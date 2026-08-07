@@ -1,0 +1,21 @@
+{
+  "name": "biar-protocol-frontend",
+  "version": "1.0.0",
+  "description": "BIAR Protocol - Decentralized Prediction Market Dashboard",
+  "scripts": {
+    "dev": "npx serve .",
+    "build": "echo 'Static site - no build required'",
+    "test": "echo 'Tests coming soon'"
+  },
+  "keywords": [
+    "prediction-market",
+    "defi",
+    "blockchain",
+    "web3"
+  ],
+  "author": "BIAR Protocol",
+  "license": "MIT",
+  "devDependencies": {
+    "serve": "^14.2.0"
+  }
+}

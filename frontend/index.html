@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BIAR Protocol - Decentralized Prediction Markets</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1',
+                        secondary: '#8b5cf6',
+                        accent: '#06b6d4',
+                        dark: {
+                            900: '#0f172a',
+                            800: '#1e293b',
+                            700: '#334155',
+                            600: '#475569'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+        }
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(99, 102, 241, 0.2);
+        }
+        .modal-backdrop {
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body class="bg-dark-900 text-white min-h-screen">
+    <!-- Navigation -->
+    <nav class="border-b border-dark-700 bg-dark-900/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 gradient-bg rounded-lg flex items-center justify-center">
+                        <span class="text-xl font-bold">B</span>
+                    </div>
+                    <span class="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">BIAR Protocol</span>
+                </div>
+                <div class="hidden md:flex items-center space-x-8">
+                    <a href="#markets" class="text-gray-300 hover:text-white transition">Markets</a>
+                    <a href="#portfolio" class="text-gray-300 hover:text-white transition">Portfolio</a>
+                    <a href="#stats" class="text-gray-300 hover:text-white transition">Stats</a>
+                    <button id="connectWallet" class="gradient-bg px-6 py-2 rounded-lg font-semibold hover:opacity-90 transition">
+                        Connect Wallet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="py-16 px-4">
+        <div class="max-w-7xl mx-auto text-center">
+            <h1 class="text-5xl md:text-6xl font-bold mb-6">
+                <span class="bg-gradient-to-r from-primary via-secondary to-accent bg-clip-text text-transparent">Predict the Future</span>
+                <br>Trade on Outcomes
+            </h1>
+            <p class="text-xl text-gray-400 max-w-2xl mx-auto mb-8">
+                Decentralized prediction markets powered by automated market makers. 
+                Trade binary and multi-outcome events with instant liquidity.
+            </p>
+            <div class="flex justify-center gap-4">
+                <a href="#markets" class="gradient-bg px-8 py-3 rounded-lg font-semibold hover:opacity-90 transition">
+                    Explore Markets
+                </a>
+                <button class="border border-dark-600 px-8 py-3 rounded-lg font-semibold hover:bg-dark-800 transition">
+                    Create Market
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section id="stats" class="py-8 px-4">
+        <div class="max-w-7xl mx-auto">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div class="bg-dark-800 rounded-xl p-6 card-hover transition-all duration-300">
+                    <p class="text-gray-400 text-sm">Active Markets</p>
+                    <p class="text-3xl font-bold" id="activeMarkets">--</p>
+                </div>
+                <div class="bg-dark-800 rounded-xl p-6 card-hover transition-all duration-300">
+                    <p class="text-gray-400 text-sm">Total Volume</p>
+                    <p class="text-3xl font-bold" id="totalVolume">$--</p>
+                </div>
+                <div class="bg-dark-800 rounded-xl p-6 card-hover transition-all duration-300">
+                    <p class="text-gray-400 text-sm">Total Trades</p>
+                    <p class="text-3xl font-bold" id="totalTrades">--</p>
+                </div>
+                <div class="bg-dark-800 rounded-xl p-6 card-hover transition-all duration-300">
+                    <p class="text-gray-400 text-sm">Your Portfolio</p>
+                    <p class="text-3xl font-bold" id="portfolioValue">$--</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Markets Section -->
+    <section id="markets" class="py-12 px-4">
+        <div class="max-w-7xl mx-auto">
+            <div class="flex items-center justify-between mb-8">
+                <h2 class="text-3xl font-bold">Active Markets</h2>
+                <div class="flex gap-4">
+                    <select id="categoryFilter" class="bg-dark-800 border border-dark-600 rounded-lg px-4 py-2">
+                        <option value="">All Categories</option>
+                        <option value="crypto">Crypto</option>
+                        <option value="politics">Politics</option>
+                        <option value="sports">Sports</option>
+                        <option value="finance">Finance</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div id="marketsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Market cards will be inserted here -->
+            </div>
+        </div>
+    </section>
+
+    <!-- Order Modal -->
+    <div id="orderModal" class="fixed inset-0 modal-backdrop bg-black/60 z-50 hidden">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-dark-800 rounded-2xl max-w-md w-full p-6 relative">
+                <button onclick="closeOrderModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+                
+                <h3 class="text-2xl font-bold mb-4">Place Order</h3>
+                <p id="modalMarketTitle" class="text-gray-400 mb-6"></p>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2">Outcome</label>
+                        <select id="outcomeSelect" class="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-3">
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm text-gray-400 mb-2">Amount (USDC)</label>
+                        <input type="number" id="orderAmount" class="w-full bg-dark-700 border border-dark-600 rounded-lg px-4 py-3" placeholder="100" min="1">
+                    </div>
+                    
+                    <div class="bg-dark-700 rounded-lg p-4">
+                        <div class="flex justify-between mb-2">
+                            <span class="text-gray-400">Estimated Shares</span>
+                            <span id="estShares">--</span>
+                        </div>
+                        <div class="flex justify-between mb-2">
+                            <span class="text-gray-400">Current Price</span>
+                            <span id="currentPrice">--</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Slippage</span>
+                            <span id="slippageEst" class="text-yellow-400">--</span>
+                        </div>
+                    </div>
+                    
+                    <button onclick="submitOrder()" class="w-full gradient-bg py-3 rounded-lg font-semibold hover:opacity-90 transition">
+                        Confirm Order
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="border-t border-dark-700 py-8 mt-16">
+        <div class="max-w-7xl mx-auto px-4 text-center text-gray-400">
+            <p>&copy; 2024 BIAR Protocol. Decentralized Prediction Markets.</p>
+        </div>
+    </footer>
+
+    <script src="src/utils/api.js"></script>
+    <script src="src/components/markets.js"></script>
+    <script src="src/components/charts.js"></script>
+    <script src="src/app.js"></script>
+</body>
+</html>
