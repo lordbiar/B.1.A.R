@@ -1,6 +1,6 @@
 /**
- * BIAR Protocol - Main Application
- * Initializes the dashboard and handles global state
+ * BIAR Protocol - Main Application with Real-Time Updates
+ * Initializes the dashboard with WebSocket-powered live data
  */
 
 // Global state
@@ -8,14 +8,16 @@ const AppState = {
     walletConnected: false,
     walletAddress: null,
     currentMarket: null,
-    markets: []
+    markets: [],
+    wsConnected: false,
+    portfolioValue: 0
 };
 
 /**
  * Initialize the application
  */
 async function initApp() {
-    console.log('BIAR Protocol Dashboard initializing...');
+    console.log('🚀 BIAR Protocol Dashboard initializing...');
     
     // Load saved wallet
     const savedWallet = localStorage.getItem('walletAddress');
@@ -27,12 +29,37 @@ async function initApp() {
     
     // Initialize components
     await loadStats();
-    await renderMarkets();
+    await renderMarketsEnhanced();
+    
+    // Connect WebSocket for real-time updates
+    await initializeWebSocket();
     
     // Setup event listeners
     setupEventListeners();
     
-    console.log('Dashboard initialized successfully');
+    console.log('✅ Dashboard initialized successfully with live updates');
+}
+
+/**
+ * Initialize WebSocket connections
+ */
+async function initializeWebSocket() {
+    try {
+        // Connect to global market feed for all market updates
+        await wsClient.connectToFeed();
+        AppState.wsConnected = true;
+        console.log('✓ WebSocket connected for live market feed');
+        
+        // If wallet is connected, also connect to user portfolio
+        if (AppState.walletConnected && AppState.walletAddress) {
+            await wsClient.connectToUserPortfolio(AppState.walletAddress);
+            console.log('✓ User portfolio WebSocket connected');
+        }
+    } catch (error) {
+        console.warn('WebSocket connection failed, will retry:', error);
+        // Retry after delay
+        setTimeout(initializeWebSocket, 5000);
+    }
 }
 
 /**
@@ -50,6 +77,7 @@ async function loadStats() {
             try {
                 const positions = await api.getUserPositions(AppState.walletAddress);
                 const portfolioValue = positions.reduce((sum, pos) => sum + (pos.shares * pos.average_cost), 0);
+                AppState.portfolioValue = portfolioValue;
                 document.getElementById('portfolioValue').textContent = `$${portfolioValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
             } catch (e) {
                 document.getElementById('portfolioValue').textContent = '$0';
@@ -67,25 +95,103 @@ async function loadStats() {
  * Setup global event listeners
  */
 function setupEventListeners() {
-    // Wallet connect button
+    // Wallet connect buttons
     const connectBtn = document.getElementById('connectWallet');
-    if (connectBtn) {
-        connectBtn.addEventListener('click', handleWalletConnect);
+    const connectBtnMobile = document.getElementById('connectWalletMobile');
+    if (connectBtn) connectBtn.addEventListener('click', handleWalletConnect);
+    if (connectBtnMobile) connectBtnMobile.addEventListener('click', handleWalletConnect);
+    
+    // Mobile menu toggle
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const mobileMenu = document.getElementById('mobileMenu');
+    if (mobileMenuBtn && mobileMenu) {
+        mobileMenuBtn.addEventListener('click', () => {
+            mobileMenu.classList.toggle('hidden');
+        });
     }
     
-    // Listen for probability updates
+    // Update WebSocket status indicator
+    const wsStatus = document.getElementById('wsStatus');
+    const updateWSStatus = (connected) => {
+        if (wsStatus) {
+            if (connected) {
+                wsStatus.innerHTML = '<span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span><span class="text-green-400">Live</span>';
+            } else {
+                wsStatus.innerHTML = '<span class="w-2 h-2 bg-yellow-400 rounded-full"></span><span class="text-yellow-400">Connecting...</span>';
+            }
+        }
+    };
+    
+    // Listen for market state updates (indicates WebSocket is working)
+    window.addEventListener('marketStateUpdate', () => {
+        updateWSStatus(true);
+    });
+    
+    // Listen for real-time probability updates
     window.addEventListener('probabilityUpdate', (event) => {
-        console.log('Probability updated:', event.detail);
-        // Could update UI elements here
+        console.log('📊 Probability updated:', event.detail);
+        // Update UI elements with new probabilities
+    });
+    
+    // Listen for real-time price updates
+    window.addEventListener('priceUpdate', (event) => {
+        console.log('💹 Price tick:', event.detail.market_id, event.detail.prices);
+    });
+    
+    // Listen for portfolio updates
+    window.addEventListener('portfolioUpdate', (event) => {
+        console.log('💼 Portfolio updated:', event.detail);
+        updatePortfolioDisplay(event.detail.portfolio);
+    });
+    
+    // Listen for notifications
+    window.addEventListener('notification', (event) => {
+        showNotification(event.detail.message, event.detail.type);
     });
     
     // Handle category filter
     const categoryFilter = document.getElementById('categoryFilter');
     if (categoryFilter) {
         categoryFilter.addEventListener('change', async (e) => {
-            await renderMarkets(e.target.value);
+            await renderMarketsEnhanced(e.target.value);
         });
     }
+}
+
+/**
+ * Update portfolio display with real-time data
+ */
+function updatePortfolioDisplay(portfolio) {
+    if (portfolio && portfolio.positions) {
+        const totalValue = portfolio.positions.reduce((sum, pos) => sum + pos.current_value, 0);
+        AppState.portfolioValue = totalValue;
+        const portfolioElement = document.getElementById('portfolioValue');
+        if (portfolioElement) {
+            portfolioElement.textContent = `$${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+            portfolioElement.classList.add('animate-pulse');
+            setTimeout(() => portfolioElement.classList.remove('animate-pulse'), 500);
+        }
+    }
+}
+
+/**
+ * Show notification to user
+ */
+function showNotification(message, type = 'info') {
+    const notificationDiv = document.createElement('div');
+    notificationDiv.className = `fixed top-4 right-4 px-6 py-3 rounded-lg text-white z-50 ${
+        type === 'success' ? 'bg-green-500' :
+        type === 'error' ? 'bg-red-500' :
+        type === 'warning' ? 'bg-yellow-500' :
+        'bg-blue-500'
+    }`;
+    notificationDiv.textContent = message;
+    document.body.appendChild(notificationDiv);
+    
+    setTimeout(() => {
+        notificationDiv.style.animation = 'fadeOut 0.3s ease-out';
+        setTimeout(() => notificationDiv.remove(), 300);
+    }, 3000);
 }
 
 /**

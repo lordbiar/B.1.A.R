@@ -3,11 +3,12 @@ BIAR Protocol - FastAPI Main Application
 REST API for prediction markets
 """
 
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
+import json
 
 from models.database import Base, Market, Order, Position, OracleFeed, MarketStatus
 from schemas.market import (
@@ -20,7 +21,10 @@ from schemas.market import (
     SuccessResponse, ErrorResponse
 )
 from services.market_service import MarketService, OrderService, OracleService
+from services.rewards import rewards_manager
 from core.amm import LMSR, ConstantProductAMM, SimulationEngine
+from core.limit_orders import limit_order_engine
+from api.websocket import ws_manager
 
 # Database setup
 from sqlalchemy import create_engine
@@ -304,6 +308,140 @@ async def simulate_liquidity_depth(request: LiquidityDepthRequest, db: Session =
     }
 
 
+# ==================== WebSocket Endpoints ====================
+
+@app.websocket("/ws/market/{market_id}/{client_id}")
+async def websocket_market_endpoint(websocket: WebSocket, market_id: int, client_id: str, db: Session = Depends(get_db)):
+    """
+    WebSocket endpoint for real-time market updates.
+    Provides live price updates, probability changes, and order notifications.
+    """
+    await ws_manager.connect(websocket, client_id, market_id)
+    
+    try:
+        while True:
+            # Receive client messages (e.g., subscribe/unsubscribe)
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            if message.get("type") == "ping":
+                # Respond to ping to keep connection alive
+                await websocket.send_json({"type": "pong", "timestamp": datetime.utcnow().isoformat()})
+            
+            elif message.get("type") == "get_market_state":
+                # Send current market state on demand
+                service = MarketService(db)
+                market = service.get_market(market_id)
+                
+                if market:
+                    quantities = market.current_liquidity or {}
+                    if isinstance(quantities, str):
+                        quantities = json.loads(quantities)
+                    
+                    prices = {}
+                    probabilities = {}
+                    
+                    for outcome in market.outcomes:
+                        price = amm_engine.get_price(quantities, outcome)
+                        prices[outcome] = round(price, 4)
+                        probabilities[outcome] = round(price * 100, 2)  # Convert to percentage
+                    
+                    await websocket.send_json({
+                        "type": "market_state",
+                        "market_id": market_id,
+                        "market": {
+                            "id": market.id,
+                            "title": market.title,
+                            "description": market.description,
+                            "outcomes": market.outcomes,
+                            "prices": prices,
+                            "probabilities": probabilities,
+                            "total_volume": round(market.total_volume, 2),
+                            "status": market.status.value if market.status else "active",
+                            "end_time": market.end_time.isoformat() if market.end_time else None
+                        },
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+    
+    except WebSocketDisconnect:
+        ws_manager.disconnect(client_id, websocket)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        ws_manager.disconnect(client_id, websocket)
+
+
+@app.websocket("/ws/user/{wallet_address}")
+async def websocket_user_endpoint(websocket: WebSocket, wallet_address: str, db: Session = Depends(get_db)):
+    """
+    WebSocket endpoint for user-specific updates.
+    Provides portfolio updates, order confirmations, and notifications.
+    """
+    await ws_manager.connect(websocket, wallet_address)
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            if message.get("type") == "ping":
+                await websocket.send_json({"type": "pong", "timestamp": datetime.utcnow().isoformat()})
+            
+            elif message.get("type") == "get_portfolio":
+                # Send current portfolio state
+                service = MarketService(db)
+                positions = service.get_user_positions(wallet_address)
+                
+                portfolio_data = {
+                    "positions": [
+                        {
+                            "market_id": pos.market_id,
+                            "outcome": pos.outcome,
+                            "shares": pos.shares,
+                            "average_cost": pos.average_cost,
+                            "current_value": round(pos.shares * pos.average_cost, 2)
+                        }
+                        for pos in positions
+                    ],
+                    "total_value": sum(pos.shares * pos.average_cost for pos in positions)
+                }
+                
+                await websocket.send_json({
+                    "type": "portfolio_state",
+                    "data": portfolio_data,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+    
+    except WebSocketDisconnect:
+        ws_manager.disconnect(wallet_address, websocket)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        ws_manager.disconnect(wallet_address, websocket)
+
+
+@app.websocket("/ws/feed")
+async def websocket_feed_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for global market feed.
+    Provides updates on all markets (price ticks, new markets, settlements).
+    """
+    client_id = "feed_" + datetime.utcnow().isoformat()
+    await ws_manager.connect(websocket, client_id)
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            if message.get("type") == "ping":
+                await websocket.send_json({"type": "pong", "timestamp": datetime.utcnow().isoformat()})
+    
+    except WebSocketDisconnect:
+        ws_manager.disconnect(client_id, websocket)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        ws_manager.disconnect(client_id, websocket)
+
+
 # ==================== Stats Endpoints ====================
 
 @app.get("/api/v1/stats", tags=["Stats"])
@@ -316,6 +454,296 @@ async def get_stats(db: Session = Depends(get_db)):
         "total_volume": round(market_service.get_total_volume(), 2),
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+# ==================== Limit Order Endpoints ====================
+
+@app.post("/api/v1/orders", tags=["Limit Orders"])
+async def place_limit_order(
+    market_id: int,
+    outcome: str,
+    side: str,
+    quantity: float,
+    price: float,
+    order_type: str = "LIMIT",
+    user_address: str = None
+):
+    """
+    Place a limit order for an outcome token
+    
+    - **market_id**: Market to trade on
+    - **outcome**: Outcome to trade
+    - **side**: BUY or SELL
+    - **quantity**: Number of shares
+    - **price**: Limit price
+    - **order_type**: LIMIT, MARKET, STOP_LOSS, CONDITIONAL
+    """
+    try:
+        order = limit_order_engine.place_order(
+            market_id=market_id,
+            outcome=outcome,
+            side=side,
+            quantity=quantity,
+            price=price,
+            order_type=order_type,
+            user_address=user_address
+        )
+        
+        # Broadcast order update via WebSocket
+        await ws_manager.broadcast_order_update(market_id, {
+            "order_id": order.order_id,
+            "market_id": order.market_id,
+            "outcome": order.outcome,
+            "side": order.side,
+            "quantity": order.quantity,
+            "price": order.price,
+            "status": order.status.value,
+            "timestamp": order.created_at.isoformat()
+        })
+        
+        return {
+            "success": True,
+            "order_id": order.order_id,
+            "status": order.status.value,
+            "message": "Order placed successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/orders/{order_id}", tags=["Limit Orders"])
+async def get_order(order_id: str):
+    """Get details of a specific order"""
+    try:
+        # Find order in engine
+        all_orders = limit_order_engine.get_all_orders()
+        order = next((o for o in all_orders if o.order_id == order_id), None)
+        
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        
+        return {
+            "order_id": order.order_id,
+            "market_id": order.market_id,
+            "outcome": order.outcome,
+            "side": order.side,
+            "quantity": order.quantity,
+            "price": order.price,
+            "status": order.status.value,
+            "filled_quantity": order.filled_quantity,
+            "created_at": order.created_at.isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/v1/orders/{order_id}", tags=["Limit Orders"])
+async def cancel_order(order_id: str, market_id: int = None):
+    """Cancel a pending order"""
+    try:
+        success = limit_order_engine.cancel_order(order_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Order not found or already cancelled")
+        
+        # Broadcast cancellation via WebSocket
+        if market_id:
+            await ws_manager.broadcast_order_update(market_id, {
+                "order_id": order_id,
+                "status": "CANCELLED",
+                "timestamp": datetime.utcnow().isoformat()
+            })
+        
+        return {"success": True, "message": "Order cancelled successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/users/{user_address}/orders", tags=["Limit Orders"])
+async def get_user_orders(user_address: str, market_id: int = None):
+    """Get all orders for a user"""
+    try:
+        orders = limit_order_engine.get_user_orders(user_address)
+        
+        # Filter by market if specified
+        if market_id:
+            orders = [o for o in orders if o.market_id == market_id]
+        
+        return {
+            "user_address": user_address,
+            "orders": [
+                {
+                    "order_id": o.order_id,
+                    "market_id": o.market_id,
+                    "outcome": o.outcome,
+                    "side": o.side,
+                    "quantity": o.quantity,
+                    "price": o.price,
+                    "status": o.status.value,
+                    "filled_quantity": o.filled_quantity
+                }
+                for o in orders
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/markets/{market_id}/orderbook", tags=["Limit Orders"])
+async def get_market_orderbook(market_id: int):
+    """Get order book for a market"""
+    try:
+        outcomes = ["YES", "NO"]  # Default outcomes, should come from market
+        
+        orderbooks = {}
+        for outcome in outcomes:
+            best_bid, best_ask = limit_order_engine.get_best_bid_ask(market_id, outcome)
+            depth = limit_order_engine.get_order_book_depth(market_id, outcome, 5)
+            
+            orderbooks[outcome] = {
+                "best_bid": best_bid,
+                "best_ask": best_ask,
+                "bids": depth.get("bids", []),
+                "asks": depth.get("asks", [])
+            }
+        
+        return {
+            "market_id": market_id,
+            "orderbooks": orderbooks,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==================== Analytics Endpoints ====================
+
+@app.get("/api/v1/markets/{market_id}/analytics", tags=["Analytics"])
+async def get_market_analytics(market_id: int, timeframe: str = "24h", db: Session = Depends(get_db)):
+    """Get advanced analytics for a market"""
+    try:
+        service = MarketService(db)
+        market = service.get_market(market_id)
+        
+        if not market:
+            raise HTTPException(status_code=404, detail="Market not found")
+        
+        # Generate mock analytics data
+        # In production, this would query a time-series database
+        prices = [0.45 + (i * 0.001) for i in range(96)]  # 24h of 15-min data
+        volumes = [1000 + (i * 10) for i in range(96)]
+        
+        return {
+            "market_id": market_id,
+            "title": market.title,
+            "prices": prices,
+            "volumes": volumes,
+            "timeframe": timeframe,
+            "current_price": prices[-1],
+            "high_24h": max(prices),
+            "low_24h": min(prices),
+            "volume_24h": sum(volumes),
+            "change_24h": round((prices[-1] - prices[0]) / prices[0] * 100, 2),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==================== Leaderboard Endpoints ====================
+
+@app.get("/api/v1/leaderboard", tags=["Leaderboard"])
+async def get_leaderboard(
+    timeframe: str = "24h",
+    category: str = "profit",
+    limit: int = 100
+):
+    """
+    Get trader leaderboard
+    
+    - **timeframe**: 24h, 7d, 30d, all
+    - **category**: profit, roi, volume, winrate, followers
+    - **limit**: Max number of traders to return (1-100)
+    """
+    try:
+        # Use rewards manager to get leaderboard data
+        leaderboard = rewards_manager.get_leaderboard_by_rewards(limit=min(limit, 100))
+        
+        return {
+            "timeframe": timeframe,
+            "category": category,
+            "traders": leaderboard,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/traders/{user_address}/stats", tags=["Leaderboard"])
+async def get_trader_stats(user_address: str):
+    """Get detailed stats for a specific trader"""
+    try:
+        summary = rewards_manager.get_reward_summary(user_address)
+        
+        return {
+            "user_address": user_address,
+            "stats": summary,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==================== Rewards Endpoints ====================
+
+@app.post("/api/v1/rewards/claim", tags=["Rewards"])
+async def claim_rewards(user_address: str):
+    """Claim all pending rewards for a user"""
+    try:
+        success, amount = rewards_manager.claim_all_rewards(user_address)
+        
+        if not success:
+            return {"success": False, "message": "No pending rewards to claim"}
+        
+        return {
+            "success": True,
+            "user_address": user_address,
+            "amount_claimed": round(amount, 2),
+            "message": f"Successfully claimed ${amount:.2f}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/rewards/{user_address}", tags=["Rewards"])
+async def get_user_rewards(user_address: str):
+    """Get reward summary for a user"""
+    try:
+        summary = rewards_manager.get_reward_summary(user_address)
+        
+        return {
+            "user_address": user_address,
+            "rewards": summary,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/v1/rewards/referral-link", tags=["Rewards"])
+async def create_referral_link(user_address: str):
+    """Create or get referral link for a user"""
+    try:
+        code = rewards_manager.create_referral_link(user_address)
+        
+        return {
+            "user_address": user_address,
+            "referral_code": code,
+            "referral_link": f"https://biar.protocol/ref?code={code}",
+            "message": "Share this link to earn rewards when friends trade"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/health")

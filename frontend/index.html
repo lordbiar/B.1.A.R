@@ -37,6 +37,55 @@
         .modal-backdrop {
             backdrop-filter: blur(4px);
         }
+        
+        /* Live indicator pulse */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .animate-pulse {
+            animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        /* Price ticker scroll */
+        @keyframes scroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-100%); }
+        }
+        
+        .animate-scroll {
+            animation: scroll 20s linear infinite;
+        }
+        
+        /* Smooth transitions for probability bars */
+        .outcome-bar {
+            transition: width 0.5s ease-in-out;
+        }
+        
+        /* Price change indicator */
+        .outcome-change {
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+        
+        /* Market card gradient on hover */
+        .market-card-gradient {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+        }
+        
+        /* Live badge animation */
+        .live-badge {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        /* Smooth number transitions */
+        .number-transition {
+            transition: all 0.3s ease-in-out;
+        }
     </style>
 </head>
 <body class="bg-dark-900 text-white min-h-screen">
@@ -48,16 +97,41 @@
                     <div class="w-10 h-10 gradient-bg rounded-lg flex items-center justify-center">
                         <span class="text-xl font-bold">B</span>
                     </div>
-                    <span class="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">BIAR Protocol</span>
+                    <span class="text-lg md:text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">BIAR</span>
                 </div>
-                <div class="hidden md:flex items-center space-x-8">
-                    <a href="#markets" class="text-gray-300 hover:text-white transition">Markets</a>
-                    <a href="#portfolio" class="text-gray-300 hover:text-white transition">Portfolio</a>
-                    <a href="#stats" class="text-gray-300 hover:text-white transition">Stats</a>
-                    <button id="connectWallet" class="gradient-bg px-6 py-2 rounded-lg font-semibold hover:opacity-90 transition">
+                
+                <!-- Desktop Menu -->
+                <div class="hidden md:flex items-center space-x-6">
+                    <a href="#markets" class="text-gray-300 hover:text-white transition text-sm">Markets</a>
+                    <button onclick="showLeaderboard()" class="text-gray-300 hover:text-white transition text-sm">🏆 Leaderboard</button>
+                    <button onclick="showRewards(AppState.walletAddress || '')" class="text-gray-300 hover:text-white transition text-sm">💰 Rewards</button>
+                    <a href="#stats" class="text-gray-300 hover:text-white transition text-sm">Stats</a>
+                    <div id="wsStatus" class="text-xs text-gray-400 flex items-center gap-1">
+                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                        Connecting...
+                    </div>
+                    <button id="connectWallet" class="gradient-bg px-4 py-2 rounded-lg font-semibold hover:opacity-90 transition text-sm">
                         Connect Wallet
                     </button>
                 </div>
+                
+                <!-- Mobile Menu Button -->
+                <button id="mobileMenuBtn" class="md:hidden text-gray-300 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <!-- Mobile Menu -->
+            <div id="mobileMenu" class="hidden md:hidden border-t border-dark-700 py-4 space-y-3">
+                <a href="#markets" class="block text-gray-300 hover:text-white transition py-2">Markets</a>
+                <button onclick="showLeaderboard()" class="w-full text-left text-gray-300 hover:text-white transition py-2">🏆 Leaderboard</button>
+                <button onclick="showRewards(AppState.walletAddress || '')" class="w-full text-left text-gray-300 hover:text-white transition py-2">💰 Rewards</button>
+                <a href="#stats" class="block text-gray-300 hover:text-white transition py-2">Stats</a>
+                <button id="connectWalletMobile" class="w-full gradient-bg px-4 py-2 rounded-lg font-semibold hover:opacity-90 transition text-sm">
+                    Connect Wallet
+                </button>
             </div>
         </div>
     </nav>
@@ -186,7 +260,12 @@
     </footer>
 
     <script src="src/utils/api.js"></script>
+    <script src="src/utils/websocket.js"></script>
     <script src="src/components/markets.js"></script>
+    <script src="src/components/live-markets.js"></script>
+    <script src="src/components/analytics.js"></script>
+    <script src="src/components/leaderboard.js"></script>
+    <script src="src/components/rewards.js"></script>
     <script src="src/components/charts.js"></script>
     <script src="src/app.js"></script>
 </body>
