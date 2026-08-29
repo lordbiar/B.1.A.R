@@ -10,14 +10,19 @@ const ApiClient = {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
 
+    // Attach JWT session token if available (components/auth.js)
+    const token = window.walletAuth?.token || null;
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     try {
       const res = await fetch(`${API_BASE}${path}`, {
         ...options,
         signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
+        headers,
       });
 
       if (res.status === 429) {
@@ -59,6 +64,29 @@ const ApiClient = {
     return this.request(`/api/v1/markets/${encodeURIComponent(marketId)}/order`, {
       method: 'POST',
       body: JSON.stringify(order),
+    });
+  },
+
+  placeLimitOrder(marketId, order) {
+    return this.request(`/api/v1/markets/${encodeURIComponent(marketId)}/limit-order`, {
+      method: 'POST',
+      body: JSON.stringify(order),
+    });
+  },
+
+  cancelLimitOrder(orderRef) {
+    return this.request(`/api/v1/limit-orders/${encodeURIComponent(orderRef)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  getPortfolio() {
+    return this.request('/api/v1/portfolio');
+  },
+
+  claimWinnings(marketId) {
+    return this.request(`/api/v1/markets/${encodeURIComponent(marketId)}/claim`, {
+      method: 'POST',
     });
   },
 

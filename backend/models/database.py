@@ -1,225 +1,109 @@
-"""
-BIAR Protocol - Database Models
-SQLAlchemy models for markets, orders, and positions
-"""
+"""BIAR Protocol - SQLAlchemy database models."""
+import datetime
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Enum, JSON
-from sqlalchemy.orm import relationship, declarative_base
-from datetime import datetime
-import enum
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    create_engine,
+)
+from sqlalchemy.orm import declarative_base, relationship
+
+from core.config import settings
+
+# Engine for DDL and sessions. SQLite check_same_thread disabled for TestClient.
+_engine_url = settings.DATABASE_URL.replace("+aiosqlite", "")
+engine = create_engine(
+    _engine_url,
+    connect_args={"check_same_thread": False} if "sqlite" in _engine_url else {},
+)
 
 Base = declarative_base()
 
 
-class MarketStatus(enum.Enum):
-    ACTIVE = "active"
-    PENDING_RESOLUTION = "pending_resolution"
-    RESOLVED = "resolved"
-    CANCELLED = "cancelled"
-
-
-class MarketType(enum.Enum):
-    BINARY = "binary"
-    MULTI_OUTCOME = "multi_outcome"
-
-
-class OrderSide(enum.Enum):
-    BUY = "buy"
-    SELL = "sell"
-
-
-class Market(Base):
-    """Prediction market table"""
+class MarketModel(Base):
     __tablename__ = "markets"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String(500), nullable=False)
-    description = Column(String(5000))
-    category = Column(String(100), index=True)  # e.g., "crypto", "politics", "sports"
-    
-    market_type = Column(Enum(MarketType), default=MarketType.BINARY)
-    outcomes = Column(JSON, nullable=False)  # List of possible outcomes
-    
-    status = Column(Enum(MarketStatus), default=MarketStatus.ACTIVE)
-    resolution_source = Column(String(200))  # Oracle feed URL or contract address
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
-    start_time = Column(DateTime, nullable=False)
-    end_time = Column(DateTime, nullable=False)
-    resolved_at = Column(DateTime)
-    
-    # AMM state
-    initial_liquidity = Column(Float, default=1000.0)
-    current_liquidity = Column(Float)
+    title = Column(String(200), nullable=False)
+    description = Column(String(2000), default="")
+    category = Column(String(50), default="other", index=True)
+    outcomes = Column(String(500), nullable=False)  # JSON-encoded list
+    creator = Column(String(42), default="anonymous")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    end_time = Column(DateTime, nullable=True)
+    resolved = Column(Boolean, default=False, index=True)
+    winning_outcome = Column(Integer, nullable=True)
     total_volume = Column(Float, default=0.0)
-    
-    # Smart contract references
-    contract_address = Column(String(66))
-    chain_id = Column(Integer, default=11155111)  # Default Sepolia
-    
-    # Resolution
-    winning_outcome = Column(String(200))
-    oracle_data = Column(JSON)
-    
-    # Relationships
-    orders = relationship("Order", back_populates="market", cascade="all, delete-orphan")
-    positions = relationship("Position", back_populates="market", cascade="all, delete-orphan")
-    
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "title": self.title,
-            "description": self.description,
-            "category": self.category,
-            "market_type": self.market_type.value,
-            "outcomes": self.outcomes,
-            "status": self.status.value,
-            "resolution_source": self.resolution_source,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "start_time": self.start_time.isoformat() if self.start_time else None,
-            "end_time": self.end_time.isoformat() if self.end_time else None,
-            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
-            "initial_liquidity": self.initial_liquidity,
-            "current_liquidity": self.current_liquidity,
-            "total_volume": self.total_volume,
-            "contract_address": self.contract_address,
-            "chain_id": self.chain_id,
-            "winning_outcome": self.winning_outcome,
-            "probabilities": self.get_probabilities()
-        }
-    
-    def get_probabilities(self) -> dict:
-        """Calculate current probabilities based on liquidity distribution"""
-        if not self.current_liquidity or not self.outcomes:
-            n = len(self.outcomes) if self.outcomes else 2
-            return {outcome: 1.0/n for outcome in (self.outcomes or ["YES", "NO"])}
-        
-        # Simplified probability calculation
-        # In production, this would use the AMM engine
-        total = sum(self.current_liquidity.values()) if isinstance(self.current_liquidity, dict) else self.current_liquidity
-        if total == 0:
-            return {outcome: 1.0/len(self.outcomes) for outcome in self.outcomes}
-        
-        if isinstance(self.current_liquidity, dict):
-            return {k: v/total for k, v in self.current_liquidity.items()}
-        
-        # Default equal distribution
-        return {outcome: 1.0/len(self.outcomes) for outcome in self.outcomes}
+    liquidity_b = Column(Float, default=200.0)
+    # Outstanding shares per outcome (JSON-encoded list, mirrors AMM q vector)
+    q_vector = Column(String(500), default="[0,0]")
+
+    trades = relationship("TradeModel", back_populates="market")
 
 
-class Order(Base):
-    """Order table for tracking trades"""
-    __tablename__ = "orders"
-    
+class TradeModel(Base):
+    __tablename__ = "trades"
+
     id = Column(Integer, primary_key=True, index=True)
-    market_id = Column(Integer, ForeignKey("markets.id"), nullable=False)
-    user_address = Column(String(42), index=True)  # Ethereum wallet address
-    
-    side = Column(Enum(OrderSide), nullable=False)
-    outcome = Column(String(100), nullable=False)
-    
-    amount = Column(Float, nullable=False)  # Amount in base currency (e.g., USDC)
-    shares = Column(Float)  # Number of outcome tokens received
-    price = Column(Float)  # Effective price per share
-    
-    slippage_tolerance = Column(Float, default=0.01)  # 1% default
-    executed_slippage = Column(Float)
-    
-    status = Column(String(20), default="pending")  # pending, executed, cancelled, failed
-    tx_hash = Column(String(66))  # Blockchain transaction hash
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
-    executed_at = Column(DateTime)
-    
-    # Relationships
-    market = relationship("Market", back_populates="orders")
-    
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "market_id": self.market_id,
-            "user_address": self.user_address,
-            "side": self.side.value,
-            "outcome": self.outcome,
-            "amount": self.amount,
-            "shares": self.shares,
-            "price": self.price,
-            "slippage_tolerance": self.slippage_tolerance,
-            "executed_slippage": self.executed_slippage,
-            "status": self.status,
-            "tx_hash": self.tx_hash,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "executed_at": self.executed_at.isoformat() if self.executed_at else None
-        }
+    market_id = Column(Integer, ForeignKey("markets.id"), nullable=False, index=True)
+    trader = Column(String(42), index=True)
+    outcome_index = Column(Integer, nullable=False)
+    side = Column(String(4), nullable=False)  # "buy" or "sell"
+    shares = Column(Float, nullable=False)
+    amount = Column(Float, nullable=False)  # collateral spent/received
+    price = Column(Float, nullable=False)  # effective avg price
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+
+    market = relationship("MarketModel", back_populates="trades")
 
 
-class Position(Base):
-    """User positions in markets"""
+class PositionModel(Base):
+    """Net share balance per (trader, market, outcome).
+
+    Maintained by the service layer on every fill so portfolio queries are
+    O(1) instead of replaying the trade history.
+    """
+
     __tablename__ = "positions"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    market_id = Column(Integer, ForeignKey("markets.id"), nullable=False)
-    user_address = Column(String(42), index=True)
-    
-    outcome = Column(String(100), nullable=False)
-    shares = Column(Float, default=0.0)
-    average_cost = Column(Float, default=0.0)  # Average cost per share
-    
+    trader = Column(String(42), nullable=False, index=True)
+    market_id = Column(Integer, ForeignKey("markets.id"), nullable=False, index=True)
+    outcome_index = Column(Integer, nullable=False)
+    shares = Column(Float, default=0.0)  # net long shares (can be 0)
+    cost_basis = Column(Float, default=0.0)  # total collateral still invested
     realized_pnl = Column(Float, default=0.0)
-    unrealized_pnl = Column(Float, default=0.0)
-    
-    claimed = Column(Boolean, default=False)
-    claim_tx_hash = Column(String(66))
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    market = relationship("Market", back_populates="positions")
-    
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "market_id": self.market_id,
-            "user_address": self.user_address,
-            "outcome": self.outcome,
-            "shares": self.shares,
-            "average_cost": self.average_cost,
-            "realized_pnl": self.realized_pnl,
-            "unrealized_pnl": self.unrealized_pnl,
-            "claimed": self.claimed,
-            "claim_tx_hash": self.claim_tx_hash,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None
-        }
+    claimed = Column(Boolean, default=False)  # winnings claimed after resolution
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    market = relationship("MarketModel")
 
 
-class OracleFeed(Base):
-    """Oracle feed configuration for market resolution"""
-    __tablename__ = "oracle_feeds"
-    
+class LimitOrderModel(Base):
+    """Persisted limit order resting on the book.
+
+    Matching is AMM-assisted: resting orders fill against the AMM when the
+    LMSR price crosses their limit price (Polymarket-style hybrid).
+    """
+
+    __tablename__ = "limit_orders"
+
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(200), nullable=False)
-    feed_url = Column(String(500))
-    feed_type = Column(String(50))  # "api", "chainlink", "custom"
-    
-    contract_address = Column(String(66))
-    chain_id = Column(Integer, default=11155111)
-    
-    is_active = Column(Boolean, default=True)
-    last_updated = Column(DateTime, default=datetime.utcnow)
-    
-    config = Column(JSON)  # Additional configuration
-    
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "name": self.name,
-            "feed_url": self.feed_url,
-            "feed_type": self.feed_type,
-            "contract_address": self.contract_address,
-            "chain_id": self.chain_id,
-            "is_active": self.is_active,
-            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
-            "config": self.config
-        }
+    order_ref = Column(String(64), unique=True, index=True)  # public order id
+    market_id = Column(Integer, ForeignKey("markets.id"), nullable=False, index=True)
+    trader = Column(String(42), nullable=False, index=True)
+    outcome_index = Column(Integer, nullable=False)
+    side = Column(String(4), nullable=False)  # "buy" or "sell"
+    quantity = Column(Float, nullable=False)
+    limit_price = Column(Float, nullable=False)
+    filled_quantity = Column(Float, default=0.0)
+    status = Column(String(16), default="open", index=True)  # open/partial/filled/cancelled/expired
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    expires_at = Column(DateTime, nullable=True)
+
+    market = relationship("MarketModel")

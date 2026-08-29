@@ -1,0 +1,41 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\PC\AppData\Local\Programs\Python\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\PC\Desktop\BAG\B.1.A.R\backend
+plugins: anyio-4.13.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 19 items
+
+tests/test_api.py::TestLMSR::test_initial_prices_uniform PASSED          [  5%]
+tests/test_api.py::TestLMSR::test_prices_sum_to_one PASSED               [ 10%]
+tests/test_api.py::TestLMSR::test_buy_shifts_price_up PASSED             [ 15%]
+tests/test_api.py::TestLMSR::test_buy_cost_positive_and_increasing PASSED [ 21%]
+tests/test_api.py::TestLMSR::test_sell_reduces_shares PASSED             [ 26%]
+tests/test_api.py::TestLMSR::test_cannot_sell_more_than_outstanding PASSED [ 31%]
+tests/test_api.py::TestLMSR::test_no_overflow_large_shares PASSED        [ 36%]
+tests/test_api.py::TestLMSR::test_invalid_index_rejected PASSED          [ 42%]
+tests/test_api.py::TestLMSR::test_slippage_grows_with_size PASSED        [ 47%]
+tests/test_api.py::TestAPI::test_health PASSED                           [ 52%]
+tests/test_api.py::TestAPI::test_create_and_list_market PASSED           [ 57%]
+tests/test_api.py::TestAPI::test_create_market_validation PASSED         [ 63%]
+tests/test_api.py::TestAPI::test_place_order_and_price_impact PASSED     [ 68%]
+tests/test_api.py::TestAPI::test_order_invalid_outcome PASSED            [ 73%]
+tests/test_api.py::TestAPI::test_order_oversized_rejected PASSED         [ 78%]
+tests/test_api.py::TestAPI::test_404_unknown_market PASSED               [ 84%]
+tests/test_api.py::TestAPI::test_orderbook PASSED                        [ 89%]
+tests/test_api.py::TestAPI::test_stats PASSED                            [ 94%]
+tests/test_api.py::TestAPI::test_resolve_forbidden_in_production PASSED  [100%]
+
+============================== warnings summary ===============================
+tests/test_api.py::TestAPI::test_create_and_list_market
+tests/test_api.py::TestAPI::test_place_order_and_price_impact
+tests/test_api.py::TestAPI::test_place_order_and_price_impact
+tests/test_api.py::TestAPI::test_order_invalid_outcome
+tests/test_api.py::TestAPI::test_order_oversized_rejected
+tests/test_api.py::TestAPI::test_orderbook
+tests/test_api.py::TestAPI::test_resolve_forbidden_in_production
+  C:\Users\PC\AppData\Local\Programs\Python\Python314\Lib\site-packages\sqlalchemy\sql\schema.py:3624: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 19 passed, 7 warnings in 5.00s ========================

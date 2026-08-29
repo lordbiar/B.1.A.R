@@ -110,9 +110,7 @@
                         <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
                         Connecting...
                     </div>
-                    <button id="connectWallet" class="gradient-bg px-4 py-2 rounded-lg font-semibold hover:opacity-90 transition text-sm">
-                        Connect Wallet
-                    </button>
+                    <div id="authContainer"></div>
                 </div>
                 
                 <!-- Mobile Menu Button -->
@@ -129,9 +127,7 @@
                 <button onclick="showLeaderboard()" class="w-full text-left text-gray-300 hover:text-white transition py-2">🏆 Leaderboard</button>
                 <button onclick="showRewards(AppState.walletAddress || '')" class="w-full text-left text-gray-300 hover:text-white transition py-2">💰 Rewards</button>
                 <a href="#stats" class="block text-gray-300 hover:text-white transition py-2">Stats</a>
-                <button id="connectWalletMobile" class="w-full gradient-bg px-4 py-2 rounded-lg font-semibold hover:opacity-90 transition text-sm">
-                    Connect Wallet
-                </button>
+                <div id="authContainerMobile"></div>
             </div>
         </div>
     </nav>
@@ -261,6 +257,7 @@
 
     <script src="src/utils/api.js"></script>
     <script src="src/utils/websocket.js"></script>
+    <script src="src/components/auth.js"></script>
     <script src="src/components/markets.js"></script>
     <script src="src/components/live-markets.js"></script>
     <script src="src/components/analytics.js"></script>

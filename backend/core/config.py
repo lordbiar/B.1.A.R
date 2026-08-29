@@ -51,5 +51,12 @@ class Settings:
     CACHE_TTL_ORDERBOOK: int = 2
     CACHE_TTL_STATS: int = 10
 
+    # Auth (SIWE-style wallet sign-in + JWT sessions)
+    JWT_SECRET: str = os.getenv("JWT_SECRET", "")
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRY_SECONDS: int = int(os.getenv("JWT_EXPIRY_SECONDS", str(24 * 3600)))
+    NONCE_TTL_SECONDS: int = int(os.getenv("NONCE_TTL_SECONDS", "300"))
+    AUTH_REQUIRED: bool = os.getenv("AUTH_REQUIRED", "false").lower() == "true"
+
 
 settings = Settings()

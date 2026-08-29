@@ -110,7 +110,9 @@ function renderMarkets() {
 async function loadMarkets() {
   try {
     const category = document.getElementById('categoryFilter')?.value || '';
-    AppState.markets = await ApiClient.getMarkets(category);
+    const res = await ApiClient.getMarkets(category);
+    // API now returns a paginated envelope { items, total, page, ... }
+    AppState.markets = Array.isArray(res) ? res : res.items;
     renderMarkets();
   } catch (e) {
     showToast(`Failed to load markets: ${e.message}`, true);
@@ -207,7 +209,7 @@ async function submitOrder() {
       side: 'buy',
       shares,
       max_slippage: 0.25,
-    });
+    }, window.walletAuth?.token);
     showToast(`Order filled: ${trade.shares} shares @ ${(trade.price * 100).toFixed(1)}¢`);
     closeOrderModal();
     await loadMarkets();
@@ -219,28 +221,19 @@ async function submitOrder() {
   }
 }
 
-// ---------- wallet ----------
+// ---------- wallet (SIWE-style auth via components/auth.js) ----------
 
-async function connectWallet() {
-  if (typeof window.ethereum === 'undefined') {
-    showToast('MetaMask not detected. Trading as guest.', true);
-    return;
-  }
-  try {
-    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-    AppState.walletAddress = accounts[0];
-    setText('connectWallet', `${AppState.walletAddress.slice(0, 6)}...${AppState.walletAddress.slice(-4)}`);
-    showToast('Wallet connected');
-  } catch (e) {
-    showToast('Wallet connection rejected', true);
-  }
+function initAuthUI() {
+  const auth = window.walletAuth;
+  AppState.walletAddress = auth.isAuthenticated ? auth.address : null;
+  renderAuthUI('authContainer');
+  renderAuthUI('authContainerMobile');
 }
 
 // ---------- init ----------
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('connectWallet')?.addEventListener('click', connectWallet);
-  document.getElementById('connectWalletMobile')?.addEventListener('click', connectWallet);
+  initAuthUI();
   document.getElementById('categoryFilter')?.addEventListener('change', loadMarkets);
   document.getElementById('orderAmount')?.addEventListener('input', updateOrderEstimate);
   document.getElementById('outcomeSelect')?.addEventListener('change', updateOrderEstimate);

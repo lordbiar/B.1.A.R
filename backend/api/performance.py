@@ -75,8 +75,8 @@ class QueryOptimizer:
             if cached:
                 return cached
         
-        from models.database import Market
-        market = db_session.query(Market).filter(Market.id == market_id).first()
+        from models.database import MarketModel
+        market = db_session.get(MarketModel, market_id)
         
         if market and use_cache:
             market_cache.set(cache_key, market)
@@ -93,8 +93,8 @@ class QueryOptimizer:
             if cached:
                 return cached
         
-        from models.database import Market
-        markets = db_session.query(Market).limit(limit).offset(offset).all()
+        from models.database import MarketModel
+        markets = db_session.query(MarketModel).limit(limit).offset(offset).all()
         
         if use_cache:
             market_cache.set(cache_key, markets)

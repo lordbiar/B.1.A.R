@@ -36,6 +36,13 @@ BIAR Protocol is a full-stack, decentralized prediction market platform that ena
 
 ## Features
 
+### Authentication & Accounts (Phase 3)
+- **Wallet Sign-In (SIWE-style)**: `POST /api/v1/auth/nonce` issues a challenge; the wallet signs it (EIP-191 `personal_sign`); `POST /api/v1/auth/verify` verifies the signature via `ecrecover` and issues a JWT session (24h expiry).
+- **Portfolio API**: `GET /api/v1/portfolio` returns live positions with cost basis, unrealized/realized PnL, and claimable winnings.
+- **Winnings Claims**: `POST /api/v1/markets/{id}/claim` redeems winning shares at $1.00 after resolution (double-claim safe).
+- **Limit Orders (persisted)**: `POST /api/v1/markets/{id}/limit-order` rests orders that fill against the AMM when the LMSR price crosses the limit; `DELETE /api/v1/limit-orders/{ref}` cancels (owner-only); `POST /api/v1/markets/{id}/match` runs the matching loop.
+- **Pagination**: `GET /api/v1/markets?page=1&page_size=20` returns `{items, total, page, page_size, pages}`.
+
 ### Core Protocol Engine
 - **Automated Market Maker (AMM)**: Implements Constant Product and LMSR models for dynamic pricing
 - **Market Management**: Create binary and multi-outcome prediction markets
@@ -104,6 +111,15 @@ npx hardhat run scripts/deploy.js --network sepolia
 | GET | `/api/v1/markets/{id}/orderbook` | Get market order book |
 | POST | `/api/v1/markets/{id}/resolve` | Resolve market via oracle |
 | GET | `/api/v1/simulation/slippage` | Calculate slippage |
+| POST | `/api/v1/auth/nonce` | Request sign-in challenge |
+| POST | `/api/v1/auth/verify` | Verify signature, get JWT |
+| GET | `/api/v1/auth/me` | Current session info |
+| GET | `/api/v1/portfolio` | User positions + PnL |
+| POST | `/api/v1/markets/{id}/claim` | Claim winnings |
+| POST | `/api/v1/markets/{id}/limit-order` | Place resting limit order |
+| GET | `/api/v1/markets/{id}/limit-orders` | List open limit orders |
+| DELETE | `/api/v1/limit-orders/{ref}` | Cancel a limit order |
+| POST | `/api/v1/markets/{id}/match` | Run limit-order matching |
 
 ## Configuration
 
