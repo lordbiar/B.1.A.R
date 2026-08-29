@@ -214,6 +214,50 @@ class TestAPI:
         # DEBUG defaults to false -> oracle-only
         assert res.status_code == 403
 
+    def test_market_duration_bounds(self, client):
+        import datetime
+
+        now = datetime.datetime.utcnow()
+
+        # Too far in the future (> 24h) -> rejected
+        far_future = (now + datetime.timedelta(hours=48)).isoformat()
+        res = client.post(
+            "/api/v1/markets",
+            json={
+                "title": "Too long market",
+                "outcomes": ["A", "B"],
+                "end_time": far_future,
+            },
+        )
+        assert res.status_code == 400
+        assert "within" in res.json()["detail"]
+
+        # Too soon (< 1h) -> rejected
+        too_soon = (now + datetime.timedelta(minutes=10)).isoformat()
+        res = client.post(
+            "/api/v1/markets",
+            json={
+                "title": "Too short market",
+                "outcomes": ["A", "B"],
+                "end_time": too_soon,
+            },
+        )
+        assert res.status_code == 400
+        assert "at least" in res.json()["detail"]
+
+        # Within window (e.g. 6h) -> accepted
+        ok_time = (now + datetime.timedelta(hours=6)).isoformat()
+        res = client.post(
+            "/api/v1/markets",
+            json={
+                "title": "Good duration market",
+                "outcomes": ["A", "B"],
+                "end_time": ok_time,
+            },
+        )
+        assert res.status_code == 200
+        assert res.json()["end_time"] is not None
+
     def test_markets_pagination(self, client):
         for i in range(5):
             client.post(

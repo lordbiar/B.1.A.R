@@ -52,8 +52,20 @@ class MarketService:
                 ).replace(tzinfo=None)
             except ValueError:
                 raise ValueError("end_time must be ISO 8601 format")
-            if end_time <= datetime.datetime.utcnow():
+            now = datetime.datetime.utcnow()
+            if end_time <= now:
                 raise ValueError("end_time must be in the future")
+            # Markets must resolve within a short window (hours to ~1 day)
+            min_duration = datetime.timedelta(hours=settings.MIN_MARKET_DURATION_HOURS)
+            max_duration = datetime.timedelta(hours=settings.MAX_MARKET_DURATION_HOURS)
+            if end_time - now < min_duration:
+                raise ValueError(
+                    f"end_time must be at least {settings.MIN_MARKET_DURATION_HOURS:g} hour(s) in the future"
+                )
+            if end_time - now > max_duration:
+                raise ValueError(
+                    f"end_time must be within {settings.MAX_MARKET_DURATION_HOURS:g} hour(s) of creation"
+                )
 
         market = MarketModel(
             title=data.title.strip(),

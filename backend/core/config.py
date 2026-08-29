@@ -45,6 +45,9 @@ class Settings:
     MAX_OUTCOMES: int = int(os.getenv("MAX_OUTCOMES", "8"))
     MAX_TITLE_LENGTH: int = 200
     MAX_DESCRIPTION_LENGTH: int = 2000
+    # Market duration bounds (hours): markets must resolve within this window
+    MIN_MARKET_DURATION_HOURS: float = float(os.getenv("MIN_MARKET_DURATION_HOURS", "1"))
+    MAX_MARKET_DURATION_HOURS: float = float(os.getenv("MAX_MARKET_DURATION_HOURS", "24"))
 
     # Cache TTLs (seconds)
     CACHE_TTL_MARKETS: int = 5
