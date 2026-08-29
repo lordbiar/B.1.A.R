@@ -36,7 +36,7 @@ const sampleMarkets = [
         status: "active",
         end_time: "2024-02-11T23:30:00Z",
         total_volume: 250000,
-        probabilities: { Chiefs: 0.35, 49ers: 0.30, Ravens: 0.20, Other: 0.15 }
+        probabilities: { Chiefs: 0.35, "49ers": 0.30, Ravens: 0.20, Other: 0.15 }
     }
 ];
 
@@ -268,20 +268,6 @@ function formatTimeRemaining(endTime) {
     return `${hours}h`;
 }
 
-// Initialize category filter
-document.addEventListener('DOMContentLoaded', () => {
-    const filter = document.getElementById('categoryFilter');
-    if (filter) {
-        filter.addEventListener('change', (e) => {
-            renderMarkets(e.target.value);
-        });
-    }
-
-    // Add input listener for real-time estimates
-    const amountInput = document.getElementById('orderAmount');
-    const outcomeSelect = document.getElementById('outcomeSelect');
-    if (amountInput && outcomeSelect) {
-        amountInput.addEventListener('input', updateOrderEstimates);
-        outcomeSelect.addEventListener('change', updateOrderEstimates);
-    }
-});
+// Note: market rendering is handled by app.js (loadMarkets/renderMarkets).
+// This file provides helper functions (formatNumber, formatTimeRemaining, etc.)
+// and the legacy renderMarkets() for backward compatibility.

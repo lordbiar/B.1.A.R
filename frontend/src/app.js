@@ -8,6 +8,7 @@ const AppState = {
   markets: [],
   walletAddress: null,
   currentMarketId: null,
+  activeCategory: '',
 };
 
 // ---------- helpers ----------
@@ -35,6 +36,26 @@ function showToast(message, isError = false) {
 
 // ---------- market rendering ----------
 
+function formatCountdown(endTime) {
+  if (!endTime) return '—';
+  const end = new Date(endTime);
+  const now = new Date();
+  const diff = end - now;
+  if (diff <= 0) return 'Ended';
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
+function isUrgent(endTime) {
+  if (!endTime) return false;
+  const diff = new Date(endTime) - new Date();
+  return diff > 0 && diff < 6 * 3600000; // less than 6 hours
+}
+
 function renderMarkets() {
   const grid = document.getElementById('marketsGrid');
   if (!grid) return;
@@ -50,73 +71,129 @@ function renderMarkets() {
 
   AppState.markets.forEach((m) => {
     const card = document.createElement('div');
-    card.className = 'bg-dark-800 rounded-xl p-6 card-hover transition-all duration-300 cursor-pointer market-card-gradient';
-    card.addEventListener('click', () => openOrderModal(m.id));
+    card.className = 'bg-dark-800 rounded-xl p-5 card-hover transition-all duration-300 market-card-gradient border border-dark-700';
 
+    // Header: category + countdown
+    const header = document.createElement('div');
+    header.className = 'flex items-center justify-between mb-3';
+    const category = document.createElement('span');
+    category.className = 'text-xs px-2 py-1 rounded bg-dark-700 text-gray-300 capitalize';
+    category.textContent = m.category;
+    const countdown = document.createElement('span');
+    const urgent = isUrgent(m.end_time);
+    countdown.className = `countdown-badge ${urgent ? 'countdown-urgent' : 'countdown-normal'}`;
+    countdown.textContent = '⏱ ' + formatCountdown(m.end_time);
+    header.appendChild(category);
+    header.appendChild(countdown);
+
+    // Title
     const title = document.createElement('h3');
-    title.className = 'font-semibold text-lg mb-2 line-clamp-2';
+    title.className = 'font-semibold text-base mb-3 line-clamp-2 leading-snug';
     title.textContent = m.title; // XSS-safe
 
-    const category = document.createElement('span');
-    category.className = 'inline-block text-xs px-2 py-1 rounded bg-dark-700 text-gray-300 mb-4';
-    category.textContent = m.category;
-
+    // YES/NO price buttons (Polymarket-style)
     const outcomesWrap = document.createElement('div');
+    outcomesWrap.className = 'space-y-2 mb-3';
     m.outcomes.forEach((name, i) => {
       const price = m.prices[i] ?? 0;
       const pct = Math.round(price * 100);
+      const isYes = name.toLowerCase() === 'yes' || i === 0;
 
-      const row = document.createElement('div');
-      row.className = 'mb-3';
-
-      const labelRow = document.createElement('div');
-      labelRow.className = 'flex justify-between text-sm mb-1';
-
+      const btn = document.createElement('div');
+      btn.className = `outcome-btn ${isYes ? 'outcome-btn-yes' : 'outcome-btn-no'}`;
+      btn.innerHTML = '';
       const nameSpan = document.createElement('span');
       nameSpan.textContent = name;
       const priceSpan = document.createElement('span');
-      priceSpan.className = 'font-semibold number-transition';
-      priceSpan.textContent = `${pct}%`;
-      priceSpan.dataset.outcome = `${m.id}-${i}`;
-
-      labelRow.appendChild(nameSpan);
-      labelRow.appendChild(priceSpan);
-
-      const barOuter = document.createElement('div');
-      barOuter.className = 'h-2 bg-dark-700 rounded-full overflow-hidden';
-      const bar = document.createElement('div');
-      bar.className = 'h-full gradient-bg outcome-bar rounded-full';
-      bar.style.width = `${pct}%`;
-      bar.dataset.bar = `${m.id}-${i}`;
-      barOuter.appendChild(bar);
-
-      row.appendChild(labelRow);
-      row.appendChild(barOuter);
-      outcomesWrap.appendChild(row);
+      priceSpan.textContent = `${pct}¢`;
+      btn.appendChild(nameSpan);
+      btn.appendChild(priceSpan);
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openOrderModal(m.id, i);
+      });
+      outcomesWrap.appendChild(btn);
     });
 
-    const volume = document.createElement('p');
-    volume.className = 'text-xs text-gray-400 mt-2';
-    volume.textContent = `Volume: ${formatMoney(m.total_volume)}`;
+    // Footer: volume + liquidity
+    const footer = document.createElement('div');
+    footer.className = 'flex items-center justify-between text-xs text-gray-400 pt-3 border-t border-dark-700';
+    const volSpan = document.createElement('span');
+    volSpan.textContent = `Vol: ${formatMoney(m.total_volume)}`;
+    const liqSpan = document.createElement('span');
+    liqSpan.textContent = `Liq: ${formatMoney(m.liquidity_b || 200)}`;
+    footer.appendChild(volSpan);
+    footer.appendChild(liqSpan);
 
+    card.appendChild(header);
     card.appendChild(title);
-    card.appendChild(category);
     card.appendChild(outcomesWrap);
-    card.appendChild(volume);
+    card.appendChild(footer);
+    card.addEventListener('click', () => openOrderModal(m.id));
     grid.appendChild(card);
   });
 }
 
+function renderFeaturedMarket() {
+  const container = document.getElementById('featuredMarket');
+  if (!container || !AppState.markets.length) return;
+
+  // Pick the market with highest volume as featured
+  const featured = [...AppState.markets].sort((a, b) => b.total_volume - a.total_volume)[0];
+  if (!featured) return;
+
+  setText('featuredTitle', featured.title);
+  setText('featuredDesc', featured.description || '');
+  setText('featuredVolume', formatMoney(featured.total_volume));
+  setText('featuredEndsIn', formatCountdown(featured.end_time));
+
+  const outcomesEl = document.getElementById('featuredOutcomes');
+  if (outcomesEl) {
+    outcomesEl.textContent = '';
+    featured.outcomes.forEach((name, i) => {
+      const price = featured.prices[i] ?? 0;
+      const pct = Math.round(price * 100);
+      const isYes = name.toLowerCase() === 'yes' || i === 0;
+
+      const btn = document.createElement('div');
+      btn.className = `outcome-btn ${isYes ? 'outcome-btn-yes' : 'outcome-btn-no'}`;
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = name;
+      const priceSpan = document.createElement('span');
+      priceSpan.textContent = `${pct}¢`;
+      btn.appendChild(nameSpan);
+      btn.appendChild(priceSpan);
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openOrderModal(featured.id, i);
+      });
+      outcomesEl.appendChild(btn);
+    });
+  }
+}
+
 async function loadMarkets() {
   try {
-    const category = document.getElementById('categoryFilter')?.value || '';
-    const res = await ApiClient.getMarkets(category);
+    const res = await ApiClient.getMarkets(AppState.activeCategory);
     // API now returns a paginated envelope { items, total, page, ... }
     AppState.markets = Array.isArray(res) ? res : res.items;
     renderMarkets();
+    renderFeaturedMarket();
   } catch (e) {
     showToast(`Failed to load markets: ${e.message}`, true);
   }
+}
+
+function initCategoryTabs() {
+  const tabs = document.querySelectorAll('.category-tab');
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      tabs.forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      AppState.activeCategory = tab.dataset.category || '';
+      loadMarkets();
+    });
+  });
 }
 
 async function loadStats() {
@@ -125,6 +202,10 @@ async function loadStats() {
     setText('activeMarkets', String(stats.active_markets));
     setText('totalVolume', formatMoney(stats.total_volume));
     setText('totalTrades', String(stats.total_trades));
+    // Also update the ticker bar
+    setText('tickerVolume', formatMoney(stats.total_volume));
+    setText('tickerActive', String(stats.active_markets));
+    setText('tickerTrades', String(stats.total_trades));
   } catch (e) {
     /* stats are non-critical */
   }
@@ -132,7 +213,7 @@ async function loadStats() {
 
 // ---------- order modal ----------
 
-function openOrderModal(marketId) {
+function openOrderModal(marketId, preselectOutcome) {
   const market = AppState.markets.find((m) => m.id === marketId);
   if (!market) return;
   AppState.currentMarketId = marketId;
@@ -147,6 +228,11 @@ function openOrderModal(marketId) {
     opt.textContent = `${name} — ${Math.round((market.prices[i] ?? 0) * 100)}%`;
     select.appendChild(opt);
   });
+
+  // Pre-select outcome if clicked from a YES/NO button
+  if (preselectOutcome !== undefined) {
+    select.value = String(preselectOutcome);
+  }
 
   document.getElementById('orderModal').classList.remove('hidden');
   updateOrderEstimate();
@@ -234,7 +320,7 @@ function initAuthUI() {
 
 document.addEventListener('DOMContentLoaded', () => {
   initAuthUI();
-  document.getElementById('categoryFilter')?.addEventListener('change', loadMarkets);
+  initCategoryTabs();
   document.getElementById('orderAmount')?.addEventListener('input', updateOrderEstimate);
   document.getElementById('outcomeSelect')?.addEventListener('change', updateOrderEstimate);
 
