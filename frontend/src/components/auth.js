@@ -177,11 +177,11 @@ function renderAuthUI(containerId) {
   if (auth.isAuthenticated) {
     const short = `${auth.address.slice(0, 6)}...${auth.address.slice(-4)}`;
     container.innerHTML = `
-      <div class="auth-chip">
-        <span class="auth-dot"></span>
-        <span class="auth-address" title="${auth.address}">${short}</span>
-        <button id="portfolio-btn" class="btn btn-sm">Portfolio</button>
-        <button id="signout-btn" class="btn btn-sm btn-ghost">Sign out</button>
+      <div class="flex items-center gap-2 bg-dark-800 border border-dark-600 rounded-lg px-3 py-1.5">
+        <span class="w-2 h-2 bg-emerald-400 rounded-full"></span>
+        <span class="text-sm text-gray-300 font-medium">${short}</span>
+        <button id="portfolio-btn" class="text-xs text-emerald-400 hover:text-emerald-300 font-medium ml-1">Portfolio</button>
+        <button id="signout-btn" class="text-xs text-gray-500 hover:text-gray-300 font-medium ml-1">Sign out</button>
       </div>`;
     document.getElementById("signout-btn").onclick = () => {
       auth.signOut();
@@ -191,7 +191,7 @@ function renderAuthUI(containerId) {
       showPortfolio();
   } else {
     container.innerHTML = `
-      <button id="signin-btn" class="btn btn-primary">Connect Wallet</button>`;
+      <button id="signin-btn" class="gradient-bg px-4 py-2 rounded-lg text-sm font-semibold hover:opacity-90 transition">Connect Wallet</button>`;
     document.getElementById("signin-btn").onclick = async () => {
       try {
         await auth.signIn();

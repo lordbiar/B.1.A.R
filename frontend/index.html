@@ -19,11 +19,13 @@
                         sans: ['Inter', 'system-ui', 'sans-serif'],
                     },
                     colors: {
-                        primary: '#6366f1',
-                        secondary: '#8b5cf6',
-                        accent: '#06b6d4',
+                        primary: '#10b981',
+                        secondary: '#14b8a6',
+                        accent: '#f59e0b',
                         success: '#22c55e',
                         danger: '#ef4444',
+                        light: '#f1f5f9',
+                        muted: '#94a3b8',
                         dark: {
                             950: '#020617',
                             900: '#0f172a',
@@ -66,11 +68,11 @@
         }
 
         .gradient-bg {
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+            background: linear-gradient(135deg, #10b981 0%, #14b8a6 50%, #06b6d4 100%);
         }
         
         .gradient-text {
-            background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+            background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
@@ -81,8 +83,8 @@
         }
         .card-hover:hover {
             transform: translateY(-4px);
-            box-shadow: 0 20px 40px rgba(99, 102, 241, 0.15);
-            border-color: rgba(99, 102, 241, 0.4);
+            box-shadow: 0 20px 40px rgba(16, 185, 129, 0.12);
+            border-color: rgba(16, 185, 129, 0.3);
         }
 
         .modal-backdrop {
@@ -111,9 +113,9 @@
             color: #fff;
         }
         .category-tab.active {
-            background: #6366f1;
+            background: #10b981;
             color: #fff;
-            border-color: #6366f1;
+            border-color: #10b981;
         }
 
         /* YES/NO buttons */
@@ -130,22 +132,22 @@
             border: 1px solid transparent;
         }
         .outcome-btn-yes {
-            background: rgba(34, 197, 94, 0.08);
-            color: #22c55e;
-            border-color: rgba(34, 197, 94, 0.25);
+            background: rgba(16, 185, 129, 0.08);
+            color: #10b981;
+            border-color: rgba(16, 185, 129, 0.25);
         }
         .outcome-btn-yes:hover {
-            background: rgba(34, 197, 94, 0.15);
-            border-color: #22c55e;
+            background: rgba(16, 185, 129, 0.15);
+            border-color: #10b981;
         }
         .outcome-btn-no {
-            background: rgba(239, 68, 68, 0.08);
-            color: #ef4444;
-            border-color: rgba(239, 68, 68, 0.25);
+            background: rgba(148, 163, 184, 0.08);
+            color: #94a3b8;
+            border-color: rgba(148, 163, 184, 0.25);
         }
         .outcome-btn-no:hover {
-            background: rgba(239, 68, 68, 0.15);
-            border-color: #ef4444;
+            background: rgba(148, 163, 184, 0.15);
+            border-color: #94a3b8;
         }
 
         /* Countdown badge */
@@ -163,8 +165,8 @@
             color: #ef4444;
         }
         .countdown-normal {
-            background: rgba(99, 102, 241, 0.1);
-            color: #818cf8;
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
         }
 
         /* Scrollbar */
@@ -175,7 +177,7 @@
 
         /* Focus styles for accessibility */
         button:focus-visible, input:focus-visible, select:focus-visible {
-            outline: 2px solid #6366f1;
+            outline: 2px solid #10b981;
             outline-offset: 2px;
         }
     </style>
