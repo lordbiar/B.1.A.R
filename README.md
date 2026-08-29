@@ -36,6 +36,9 @@ BIAR Protocol is a full-stack, decentralized prediction market platform that ena
 
 ## Features
 
+### Market Duration (Phase 3)
+- **Short-lived markets**: Markets must resolve within a configurable window — default **1 hour minimum** and **24 hours maximum** (`MIN_MARKET_DURATION_HOURS` / `MAX_MARKET_DURATION_HOURS` env vars). This keeps the platform fast-moving like Polymarket's event markets.
+
 ### Authentication & Accounts (Phase 3)
 - **Wallet Sign-In (SIWE-style)**: `POST /api/v1/auth/nonce` issues a challenge; the wallet signs it (EIP-191 `personal_sign`); `POST /api/v1/auth/verify` verifies the signature via `ecrecover` and issues a JWT session (24h expiry).
 - **Portfolio API**: `GET /api/v1/portfolio` returns live positions with cost basis, unrealized/realized PnL, and claimable winnings.
