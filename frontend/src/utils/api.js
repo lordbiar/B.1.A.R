@@ -1,120 +1,77 @@
 /**
- * BIAR Protocol - API Client
- * Handles communication with the backend API
+ * BIAR Protocol - API client with input sanitization and error handling.
  */
+const API_BASE = window.location.hostname === 'localhost'
+  ? 'http://localhost:8000'
+  : window.location.origin;
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+const ApiClient = {
+  async request(path, options = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
 
-class BIAPI {
-    constructor(baseUrl = API_BASE_URL) {
-        this.baseUrl = baseUrl;
+    try {
+      const res = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      });
+
+      if (res.status === 429) {
+        throw new Error('Rate limit exceeded. Please slow down.');
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `Request failed (${res.status})`);
+      }
+      return await res.json();
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        throw new Error('Request timed out');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
     }
+  },
 
-    async request(endpoint, options = {}) {
-        const url = `${this.baseUrl}${endpoint}`;
-        const config = {
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            },
-            ...options
-        };
+  getMarkets(category) {
+    const q = category ? `?category=${encodeURIComponent(category)}` : '';
+    return this.request(`/api/v1/markets${q}`);
+  },
 
-        try {
-            const response = await fetch(url, config);
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'API request failed');
-            }
-            return await response.json();
-        } catch (error) {
-            console.error('API Error:', error);
-            throw error;
-        }
-    }
+  getMarket(id) {
+    return this.request(`/api/v1/markets/${encodeURIComponent(id)}`);
+  },
 
-    // Market endpoints
-    async getMarkets(filters = {}) {
-        const params = new URLSearchParams();
-        if (filters.status) params.append('status', filters.status);
-        if (filters.category) params.append('category', filters.category);
-        if (filters.limit) params.append('limit', filters.limit);
-        
-        return this.request(`/markets?${params.toString()}`);
-    }
+  getOrderbook(id) {
+    return this.request(`/api/v1/markets/${encodeURIComponent(id)}/orderbook`);
+  },
 
-    async getMarket(marketId) {
-        return this.request(`/markets/${marketId}`);
-    }
+  getStats() {
+    return this.request('/api/v1/stats');
+  },
 
-    async createMarket(marketData) {
-        return this.request('/markets', {
-            method: 'POST',
-            body: JSON.stringify(marketData)
-        });
-    }
+  placeOrder(marketId, order) {
+    return this.request(`/api/v1/markets/${encodeURIComponent(marketId)}/order`, {
+      method: 'POST',
+      body: JSON.stringify(order),
+    });
+  },
 
-    async resolveMarket(marketId, winningOutcome, oracleData = null) {
-        return this.request(`/markets/${marketId}/resolve?winning_outcome=${encodeURIComponent(winningOutcome)}`, {
-            method: 'POST',
-            body: JSON.stringify({ oracle_data: oracleData })
-        });
-    }
+  createMarket(data) {
+    return this.request('/api/v1/markets', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+};
 
-    // Order endpoints
-    async placeOrder(marketId, orderData) {
-        return this.request(`/markets/${marketId}/order`, {
-            method: 'POST',
-            body: JSON.stringify(orderData)
-        });
-    }
-
-    async getOrderbook(marketId) {
-        return this.request(`/markets/${marketId}/orderbook`);
-    }
-
-    // Position endpoints
-    async getUserPositions(userAddress, marketId = null) {
-        const endpoint = marketId 
-            ? `/users/${userAddress}/positions?market_id=${marketId}`
-            : `/users/${userAddress}/positions`;
-        return this.request(endpoint);
-    }
-
-    // Simulation endpoints
-    async simulateSlippage(marketId, outcome, amount, modelType = 'lmsr') {
-        return this.request('/simulation/slippage', {
-            method: 'POST',
-            body: JSON.stringify({
-                market_id: marketId,
-                outcome,
-                amount,
-                model_type: modelType
-            })
-        });
-    }
-
-    async simulateLiquidityDepth(marketId, outcome, tradeSizes = [10, 50, 100, 500, 1000]) {
-        return this.request('/simulation/liquidity-depth', {
-            method: 'POST',
-            body: JSON.stringify({
-                market_id: marketId,
-                outcome,
-                trade_sizes: tradeSizes
-            })
-        });
-    }
-
-    // Stats endpoint
-    async getStats() {
-        return this.request('/stats');
-    }
-
-    // Oracle endpoints
-    async getOracleFeeds(activeOnly = true) {
-        return this.request(`/oracles?active_only=${activeOnly}`);
-    }
+// XSS-safe DOM text setter
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
 }
-
-// Export singleton instance
-const api = new BIAPI();

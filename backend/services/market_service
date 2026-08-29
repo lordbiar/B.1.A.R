@@ -1,0 +1,196 @@
+"""BIAR Protocol - Market service: business logic between API and DB/AMM."""
+import datetime
+import json
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from core.amm import AMMError, LMSRMarket
+from core.config import settings
+from models.database import MarketModel, TradeModel
+from schemas.market import MarketCreate, OrderRequest
+
+
+class MarketNotFound(Exception):
+    pass
+
+
+class MarketResolvedError(Exception):
+    pass
+
+
+class MarketService:
+    """Encapsulates all market operations with AMM state management."""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    # ---------- helpers ----------
+
+    def _get_market(self, market_id: int) -> MarketModel:
+        m = self.db.get(MarketModel, market_id)
+        if m is None:
+            raise MarketNotFound(f"Market {market_id} not found")
+        return m
+
+    def _load_amm(self, market: MarketModel) -> LMSRMarket:
+        q = json.loads(market.q_vector)
+        return LMSRMarket(liquidity_b=market.liquidity_b, q=q)
+
+    def _save_amm(self, market: MarketModel, amm: LMSRMarket) -> None:
+        market.q_vector = json.dumps(amm.q)
+
+    # ---------- market CRUD ----------
+
+    def create_market(self, data: MarketCreate) -> MarketModel:
+        end_time = None
+        if data.end_time:
+            try:
+                end_time = datetime.datetime.fromisoformat(
+                    data.end_time.replace("Z", "+00:00")
+                ).replace(tzinfo=None)
+            except ValueError:
+                raise ValueError("end_time must be ISO 8601 format")
+            if end_time <= datetime.datetime.utcnow():
+                raise ValueError("end_time must be in the future")
+
+        market = MarketModel(
+            title=data.title.strip(),
+            description=data.description.strip(),
+            category=data.category,
+            outcomes=json.dumps(data.outcomes),
+            creator=data.creator,
+            end_time=end_time,
+            liquidity_b=settings.LMSR_LIQUIDITY_B,
+            q_vector=json.dumps([0.0] * len(data.outcomes)),
+        )
+        self.db.add(market)
+        self.db.commit()
+        self.db.refresh(market)
+        return market
+
+    def list_markets(self, category: str | None = None, active_only: bool = True):
+        stmt = select(MarketModel).order_by(MarketModel.created_at.desc())
+        if active_only:
+            stmt = stmt.where(MarketModel.resolved.is_(False))
+        if category:
+            stmt = stmt.where(MarketModel.category == category)
+        return list(self.db.execute(stmt).scalars().all())
+
+    def get_market(self, market_id: int) -> MarketModel:
+        return self._get_market(market_id)
+
+    def get_prices(self, market: MarketModel) -> list[float]:
+        return self._load_amm(market).prices()
+
+    # ---------- trading ----------
+
+    def place_order(self, market_id: int, order: OrderRequest) -> TradeModel:
+        market = self._get_market(market_id)
+        if market.resolved:
+            raise MarketResolvedError("Market is already resolved")
+        if market.end_time and datetime.datetime.utcnow() > market.end_time:
+            raise MarketResolvedError("Market has ended")
+
+        outcomes = json.loads(market.outcomes)
+        if order.outcome_index >= len(outcomes):
+            raise AMMError("Invalid outcome index")
+
+        amm = self._load_amm(market)
+
+        # Enforce user-specified slippage cap if provided
+        if order.max_slippage is not None:
+            slip = amm.slippage(order.outcome_index, order.shares)
+            if slip > order.max_slippage:
+                raise AMMError(
+                    f"Slippage {slip:.2%} exceeds your limit {order.max_slippage:.2%}"
+                )
+
+        # Protocol-level guard rails
+        amm.assert_trade_allowed(order.outcome_index, order.shares)
+
+        if order.side == "buy":
+            amount = amm.execute_buy(order.outcome_index, order.shares)
+        else:
+            amount = amm.execute_sell(order.outcome_index, order.shares)
+
+        price = amount / order.shares
+        market.total_volume += amount
+        self._save_amm(market, amm)
+
+        trade = TradeModel(
+            market_id=market.id,
+            trader=order.trader,
+            outcome_index=order.outcome_index,
+            side=order.side,
+            shares=order.shares,
+            amount=amount,
+            price=price,
+        )
+        self.db.add(trade)
+        self.db.commit()
+        self.db.refresh(trade)
+        return trade
+
+    # ---------- resolution ----------
+
+    def resolve_market(self, market_id: int, winning_outcome: int) -> MarketModel:
+        market = self._get_market(market_id)
+        if market.resolved:
+            raise MarketResolvedError("Market already resolved")
+        outcomes = json.loads(market.outcomes)
+        if not 0 <= winning_outcome < len(outcomes):
+            raise ValueError("winning_outcome index out of range")
+        market.resolved = True
+        market.winning_outcome = winning_outcome
+        self.db.commit()
+        self.db.refresh(market)
+        return market
+
+    # ---------- stats ----------
+
+    def get_stats(self) -> dict:
+        total_markets = self.db.execute(
+            select(func.count(MarketModel.id))
+        ).scalar_one()
+        active_markets = self.db.execute(
+            select(func.count(MarketModel.id)).where(MarketModel.resolved.is_(False))
+        ).scalar_one()
+        total_volume = self.db.execute(
+            select(func.coalesce(func.sum(MarketModel.total_volume), 0.0))
+        ).scalar_one()
+        total_trades = self.db.execute(select(func.count(TradeModel.id))).scalar_one()
+        return {
+            "active_markets": active_markets,
+            "total_markets": total_markets,
+            "total_volume": round(total_volume, 2),
+            "total_trades": total_trades,
+        }
+
+    def get_orderbook(self, market_id: int) -> dict:
+        market = self._get_market(market_id)
+        outcomes = json.loads(market.outcomes)
+        amm = self._load_amm(market)
+        prices = amm.prices()
+
+        # Depth ladder: cost to buy increasing share sizes per outcome
+        sizes = [10, 50, 100, 500]
+        depth = []
+        for i, name in enumerate(outcomes):
+            ladder = []
+            for s in sizes:
+                try:
+                    cost = amm.buy_cost(i, s)
+                    ladder.append(
+                        {"shares": s, "cost": round(cost, 4), "avg_price": round(cost / s, 4)}
+                    )
+                except AMMError:
+                    break
+            depth.append({"outcome": name, "price": round(prices[i], 4), "ladder": ladder})
+
+        return {
+            "market_id": market.id,
+            "outcomes": outcomes,
+            "prices": [round(p, 4) for p in prices],
+            "depth": depth,
+        }

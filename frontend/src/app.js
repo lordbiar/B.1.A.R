@@ -1,287 +1,279 @@
 /**
- * BIAR Protocol - Main Application with Real-Time Updates
- * Initializes the dashboard with WebSocket-powered live data
+ * BIAR Protocol - Main application logic.
+ * Security: all user-controlled data rendered via textContent (XSS-safe),
+ * order inputs validated client-side before submission.
  */
 
-// Global state
 const AppState = {
-    walletConnected: false,
-    walletAddress: null,
-    currentMarket: null,
-    markets: [],
-    wsConnected: false,
-    portfolioValue: 0
+  markets: [],
+  walletAddress: null,
+  currentMarketId: null,
 };
 
-/**
- * Initialize the application
- */
-async function initApp() {
-    console.log('🚀 BIAR Protocol Dashboard initializing...');
-    
-    // Load saved wallet
-    const savedWallet = localStorage.getItem('walletAddress');
-    if (savedWallet) {
-        AppState.walletAddress = savedWallet;
-        AppState.walletConnected = true;
-        updateConnectButton();
-    }
-    
-    // Initialize components
-    await loadStats();
-    await renderMarketsEnhanced();
-    
-    // Connect WebSocket for real-time updates
-    await initializeWebSocket();
-    
-    // Setup event listeners
-    setupEventListeners();
-    
-    console.log('✅ Dashboard initialized successfully with live updates');
+// ---------- helpers ----------
+
+function formatMoney(n) {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${Number(n).toFixed(2)}`;
 }
 
-/**
- * Initialize WebSocket connections
- */
-async function initializeWebSocket() {
-    try {
-        // Connect to global market feed for all market updates
-        await wsClient.connectToFeed();
-        AppState.wsConnected = true;
-        console.log('✓ WebSocket connected for live market feed');
-        
-        // If wallet is connected, also connect to user portfolio
-        if (AppState.walletConnected && AppState.walletAddress) {
-            await wsClient.connectToUserPortfolio(AppState.walletAddress);
-            console.log('✓ User portfolio WebSocket connected');
-        }
-    } catch (error) {
-        console.warn('WebSocket connection failed, will retry:', error);
-        // Retry after delay
-        setTimeout(initializeWebSocket, 5000);
-    }
+function showToast(message, isError = false) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    toast.className = 'fixed bottom-6 right-6 z-[100] px-4 py-3 rounded-lg shadow-lg transition-opacity duration-300';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message; // XSS-safe
+  toast.style.background = isError ? '#dc2626' : '#1e293b';
+  toast.style.border = isError ? '1px solid #ef4444' : '1px solid #6366f1';
+  toast.style.opacity = '1';
+  setTimeout(() => { toast.style.opacity = '0'; }, 3500);
 }
 
-/**
- * Load platform statistics
- */
+// ---------- market rendering ----------
+
+function renderMarkets() {
+  const grid = document.getElementById('marketsGrid');
+  if (!grid) return;
+  grid.textContent = '';
+
+  if (!AppState.markets.length) {
+    const empty = document.createElement('p');
+    empty.className = 'text-gray-400 col-span-full text-center py-12';
+    empty.textContent = 'No active markets yet. Create the first one!';
+    grid.appendChild(empty);
+    return;
+  }
+
+  AppState.markets.forEach((m) => {
+    const card = document.createElement('div');
+    card.className = 'bg-dark-800 rounded-xl p-6 card-hover transition-all duration-300 cursor-pointer market-card-gradient';
+    card.addEventListener('click', () => openOrderModal(m.id));
+
+    const title = document.createElement('h3');
+    title.className = 'font-semibold text-lg mb-2 line-clamp-2';
+    title.textContent = m.title; // XSS-safe
+
+    const category = document.createElement('span');
+    category.className = 'inline-block text-xs px-2 py-1 rounded bg-dark-700 text-gray-300 mb-4';
+    category.textContent = m.category;
+
+    const outcomesWrap = document.createElement('div');
+    m.outcomes.forEach((name, i) => {
+      const price = m.prices[i] ?? 0;
+      const pct = Math.round(price * 100);
+
+      const row = document.createElement('div');
+      row.className = 'mb-3';
+
+      const labelRow = document.createElement('div');
+      labelRow.className = 'flex justify-between text-sm mb-1';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = name;
+      const priceSpan = document.createElement('span');
+      priceSpan.className = 'font-semibold number-transition';
+      priceSpan.textContent = `${pct}%`;
+      priceSpan.dataset.outcome = `${m.id}-${i}`;
+
+      labelRow.appendChild(nameSpan);
+      labelRow.appendChild(priceSpan);
+
+      const barOuter = document.createElement('div');
+      barOuter.className = 'h-2 bg-dark-700 rounded-full overflow-hidden';
+      const bar = document.createElement('div');
+      bar.className = 'h-full gradient-bg outcome-bar rounded-full';
+      bar.style.width = `${pct}%`;
+      bar.dataset.bar = `${m.id}-${i}`;
+      barOuter.appendChild(bar);
+
+      row.appendChild(labelRow);
+      row.appendChild(barOuter);
+      outcomesWrap.appendChild(row);
+    });
+
+    const volume = document.createElement('p');
+    volume.className = 'text-xs text-gray-400 mt-2';
+    volume.textContent = `Volume: ${formatMoney(m.total_volume)}`;
+
+    card.appendChild(title);
+    card.appendChild(category);
+    card.appendChild(outcomesWrap);
+    card.appendChild(volume);
+    grid.appendChild(card);
+  });
+}
+
+async function loadMarkets() {
+  try {
+    const category = document.getElementById('categoryFilter')?.value || '';
+    AppState.markets = await ApiClient.getMarkets(category);
+    renderMarkets();
+  } catch (e) {
+    showToast(`Failed to load markets: ${e.message}`, true);
+  }
+}
+
 async function loadStats() {
-    try {
-        const stats = await api.getStats();
-        
-        document.getElementById('activeMarkets').textContent = stats.active_markets || '--';
-        document.getElementById('totalVolume').textContent = `$${(stats.total_volume || 0).toLocaleString()}`;
-        document.getElementById('totalTrades').textContent = Math.floor((stats.total_volume || 0) / 100);
-        
-        if (AppState.walletConnected && AppState.walletAddress) {
-            try {
-                const positions = await api.getUserPositions(AppState.walletAddress);
-                const portfolioValue = positions.reduce((sum, pos) => sum + (pos.shares * pos.average_cost), 0);
-                AppState.portfolioValue = portfolioValue;
-                document.getElementById('portfolioValue').textContent = `$${portfolioValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-            } catch (e) {
-                document.getElementById('portfolioValue').textContent = '$0';
-            }
-        }
-    } catch (error) {
-        console.log('Stats not available, using defaults');
-        document.getElementById('activeMarkets').textContent = '3';
-        document.getElementById('totalVolume').textContent = '$464,000';
-        document.getElementById('totalTrades').textContent = '4,640';
-    }
+  try {
+    const stats = await ApiClient.getStats();
+    setText('activeMarkets', String(stats.active_markets));
+    setText('totalVolume', formatMoney(stats.total_volume));
+    setText('totalTrades', String(stats.total_trades));
+  } catch (e) {
+    /* stats are non-critical */
+  }
 }
 
-/**
- * Setup global event listeners
- */
-function setupEventListeners() {
-    // Wallet connect buttons
-    const connectBtn = document.getElementById('connectWallet');
-    const connectBtnMobile = document.getElementById('connectWalletMobile');
-    if (connectBtn) connectBtn.addEventListener('click', handleWalletConnect);
-    if (connectBtnMobile) connectBtnMobile.addEventListener('click', handleWalletConnect);
-    
-    // Mobile menu toggle
-    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
-    const mobileMenu = document.getElementById('mobileMenu');
-    if (mobileMenuBtn && mobileMenu) {
-        mobileMenuBtn.addEventListener('click', () => {
-            mobileMenu.classList.toggle('hidden');
+// ---------- order modal ----------
+
+function openOrderModal(marketId) {
+  const market = AppState.markets.find((m) => m.id === marketId);
+  if (!market) return;
+  AppState.currentMarketId = marketId;
+
+  setText('modalMarketTitle', market.title);
+
+  const select = document.getElementById('outcomeSelect');
+  select.textContent = '';
+  market.outcomes.forEach((name, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = `${name} — ${Math.round((market.prices[i] ?? 0) * 100)}%`;
+    select.appendChild(opt);
+  });
+
+  document.getElementById('orderModal').classList.remove('hidden');
+  updateOrderEstimate();
+}
+
+function closeOrderModal() {
+  document.getElementById('orderModal').classList.add('hidden');
+  AppState.currentMarketId = null;
+}
+
+function updateOrderEstimate() {
+  const market = AppState.markets.find((m) => m.id === AppState.currentMarketId);
+  if (!market) return;
+  const outcomeIdx = parseInt(document.getElementById('outcomeSelect').value, 10);
+  const shares = parseFloat(document.getElementById('orderAmount').value) || 0;
+
+  if (shares <= 0) {
+    setText('estShares', '--');
+    setText('currentPrice', '--');
+    setText('slippageEst', '--');
+    return;
+  }
+
+  const price = market.prices[outcomeIdx] ?? 0;
+  setText('currentPrice', `${Math.round(price * 100)}¢`);
+  setText('estShares', shares.toFixed(2));
+
+  // Rough slippage estimate: grows with size relative to liquidity
+  const slip = Math.min((shares / (market.liquidity_b * 10)) * 100, 25);
+  const slipEl = document.getElementById('slippageEst');
+  slipEl.textContent = `~${slip.toFixed(2)}%`;
+  slipEl.className = slip > 10 ? 'text-red-400' : slip > 3 ? 'text-yellow-400' : 'text-green-400';
+}
+
+async function submitOrder() {
+  const market = AppState.markets.find((m) => m.id === AppState.currentMarketId);
+  if (!market) return;
+
+  const outcomeIndex = parseInt(document.getElementById('outcomeSelect').value, 10);
+  const shares = parseFloat(document.getElementById('orderAmount').value);
+
+  // Client-side validation mirrors backend rules
+  if (!Number.isFinite(shares) || shares <= 0) {
+    showToast('Enter a valid share amount', true);
+    return;
+  }
+  if (shares > 100000) {
+    showToast('Amount exceeds maximum trade size', true);
+    return;
+  }
+
+  const btn = document.querySelector('#orderModal button[onclick="submitOrder()"]');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  try {
+    const trade = await ApiClient.placeOrder(AppState.currentMarketId, {
+      trader: AppState.walletAddress || 'anonymous',
+      outcome_index: outcomeIndex,
+      side: 'buy',
+      shares,
+      max_slippage: 0.25,
+    });
+    showToast(`Order filled: ${trade.shares} shares @ ${(trade.price * 100).toFixed(1)}¢`);
+    closeOrderModal();
+    await loadMarkets();
+  } catch (e) {
+    showToast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Confirm Order';
+  }
+}
+
+// ---------- wallet ----------
+
+async function connectWallet() {
+  if (typeof window.ethereum === 'undefined') {
+    showToast('MetaMask not detected. Trading as guest.', true);
+    return;
+  }
+  try {
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    AppState.walletAddress = accounts[0];
+    setText('connectWallet', `${AppState.walletAddress.slice(0, 6)}...${AppState.walletAddress.slice(-4)}`);
+    showToast('Wallet connected');
+  } catch (e) {
+    showToast('Wallet connection rejected', true);
+  }
+}
+
+// ---------- init ----------
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('connectWallet')?.addEventListener('click', connectWallet);
+  document.getElementById('connectWalletMobile')?.addEventListener('click', connectWallet);
+  document.getElementById('categoryFilter')?.addEventListener('change', loadMarkets);
+  document.getElementById('orderAmount')?.addEventListener('input', updateOrderEstimate);
+  document.getElementById('outcomeSelect')?.addEventListener('change', updateOrderEstimate);
+
+  // Mobile menu toggle
+  document.getElementById('mobileMenuBtn')?.addEventListener('click', () => {
+    document.getElementById('mobileMenu')?.classList.toggle('hidden');
+  });
+
+  loadMarkets();
+  loadStats();
+  wsClient.connectToFeed();
+
+  // Real-time updates via WebSocket
+  wsClient.subscribe('*', (data) => {
+    if (data.type === 'prices' && data.prices) {
+      const market = AppState.markets.find((m) => m.id === data.market_id);
+      if (market) {
+        market.prices = data.prices;
+        data.prices.forEach((p, i) => {
+          const pct = Math.round(p * 100);
+          const el = document.querySelector(`[data-outcome="${data.market_id}-${i}"]`);
+          const bar = document.querySelector(`[data-bar="${data.market_id}-${i}"]`);
+          if (el) el.textContent = `${pct}%`;
+          if (bar) bar.style.width = `${pct}%`;
         });
+      }
     }
-    
-    // Update WebSocket status indicator
-    const wsStatus = document.getElementById('wsStatus');
-    const updateWSStatus = (connected) => {
-        if (wsStatus) {
-            if (connected) {
-                wsStatus.innerHTML = '<span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span><span class="text-green-400">Live</span>';
-            } else {
-                wsStatus.innerHTML = '<span class="w-2 h-2 bg-yellow-400 rounded-full"></span><span class="text-yellow-400">Connecting...</span>';
-            }
-        }
-    };
-    
-    // Listen for market state updates (indicates WebSocket is working)
-    window.addEventListener('marketStateUpdate', () => {
-        updateWSStatus(true);
-    });
-    
-    // Listen for real-time probability updates
-    window.addEventListener('probabilityUpdate', (event) => {
-        console.log('📊 Probability updated:', event.detail);
-        // Update UI elements with new probabilities
-    });
-    
-    // Listen for real-time price updates
-    window.addEventListener('priceUpdate', (event) => {
-        console.log('💹 Price tick:', event.detail.market_id, event.detail.prices);
-    });
-    
-    // Listen for portfolio updates
-    window.addEventListener('portfolioUpdate', (event) => {
-        console.log('💼 Portfolio updated:', event.detail);
-        updatePortfolioDisplay(event.detail.portfolio);
-    });
-    
-    // Listen for notifications
-    window.addEventListener('notification', (event) => {
-        showNotification(event.detail.message, event.detail.type);
-    });
-    
-    // Handle category filter
-    const categoryFilter = document.getElementById('categoryFilter');
-    if (categoryFilter) {
-        categoryFilter.addEventListener('change', async (e) => {
-            await renderMarketsEnhanced(e.target.value);
-        });
+    if (data.type === 'trade') {
+      loadStats();
     }
-}
+  });
 
-/**
- * Update portfolio display with real-time data
- */
-function updatePortfolioDisplay(portfolio) {
-    if (portfolio && portfolio.positions) {
-        const totalValue = portfolio.positions.reduce((sum, pos) => sum + pos.current_value, 0);
-        AppState.portfolioValue = totalValue;
-        const portfolioElement = document.getElementById('portfolioValue');
-        if (portfolioElement) {
-            portfolioElement.textContent = `$${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-            portfolioElement.classList.add('animate-pulse');
-            setTimeout(() => portfolioElement.classList.remove('animate-pulse'), 500);
-        }
-    }
-}
-
-/**
- * Show notification to user
- */
-function showNotification(message, type = 'info') {
-    const notificationDiv = document.createElement('div');
-    notificationDiv.className = `fixed top-4 right-4 px-6 py-3 rounded-lg text-white z-50 ${
-        type === 'success' ? 'bg-green-500' :
-        type === 'error' ? 'bg-red-500' :
-        type === 'warning' ? 'bg-yellow-500' :
-        'bg-blue-500'
-    }`;
-    notificationDiv.textContent = message;
-    document.body.appendChild(notificationDiv);
-    
-    setTimeout(() => {
-        notificationDiv.style.animation = 'fadeOut 0.3s ease-out';
-        setTimeout(() => notificationDiv.remove(), 300);
-    }, 3000);
-}
-
-/**
- * Handle wallet connection
- */
-async function handleWalletConnect() {
-    if (typeof window.ethereum !== 'undefined') {
-        try {
-            // Request account access
-            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-            const address = accounts[0];
-            
-            AppState.walletAddress = address;
-            AppState.walletConnected = true;
-            localStorage.setItem('walletAddress', address);
-            
-            updateConnectButton();
-            loadStats();
-            
-            console.log('Wallet connected:', address);
-        } catch (error) {
-            console.error('Wallet connection failed:', error);
-            // Fallback to demo mode
-            useDemoWallet();
-        }
-    } else {
-        // No Web3 provider, use demo wallet
-        useDemoWallet();
-    }
-}
-
-/**
- * Use a demo wallet for testing without MetaMask
- */
-function useDemoWallet() {
-    const demoAddress = '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb';
-    AppState.walletAddress = demoAddress;
-    AppState.walletConnected = true;
-    localStorage.setItem('walletAddress', demoAddress);
-    updateConnectButton();
-    console.log('Using demo wallet:', demoAddress);
-}
-
-/**
- * Update connect button state
- */
-function updateConnectButton() {
-    const btn = document.getElementById('connectWallet');
-    if (!btn) return;
-    
-    if (AppState.walletConnected && AppState.walletAddress) {
-        const shortAddr = `${AppState.walletAddress.slice(0, 6)}...${AppState.walletAddress.slice(-4)}`;
-        btn.textContent = shortAddr;
-        btn.classList.add('bg-green-600');
-    } else {
-        btn.textContent = 'Connect Wallet';
-        btn.classList.remove('bg-green-600');
-    }
-}
-
-/**
- * Format address for display
- */
-function formatAddress(address) {
-    if (!address) return '';
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
-/**
- * Refresh all data
- */
-async function refreshData() {
-    await loadStats();
-    await renderMarkets(document.getElementById('categoryFilter')?.value || '');
-}
-
-// Auto-refresh every 30 seconds
-setInterval(refreshData, 30000);
-
-// Initialize on DOM ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initApp);
-} else {
-    initApp();
-}
-
-// Export for debugging
-window.BIAR = {
-    state: AppState,
-    api,
-    refreshData,
-    initApp
-};
+  // Periodic stats refresh
+  setInterval(loadStats, 15000);
+});
