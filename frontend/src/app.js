@@ -56,84 +56,6 @@ function isUrgent(endTime) {
   return diff > 0 && diff < 6 * 3600000; // less than 6 hours
 }
 
-function renderMarkets() {
-  const grid = document.getElementById('marketsGrid');
-  if (!grid) return;
-  grid.textContent = '';
-
-  if (!AppState.markets.length) {
-    const empty = document.createElement('p');
-    empty.className = 'text-gray-400 col-span-full text-center py-12';
-    empty.textContent = 'No active markets yet. Create the first one!';
-    grid.appendChild(empty);
-    return;
-  }
-
-  AppState.markets.forEach((m) => {
-    const card = document.createElement('div');
-    card.className = 'bg-dark-800 rounded-xl p-5 card-hover transition-all duration-300 market-card-gradient border border-dark-700';
-
-    // Header: category + countdown
-    const header = document.createElement('div');
-    header.className = 'flex items-center justify-between mb-3';
-    const category = document.createElement('span');
-    category.className = 'text-xs px-2 py-1 rounded bg-dark-700 text-gray-300 capitalize';
-    category.textContent = m.category;
-    const countdown = document.createElement('span');
-    const urgent = isUrgent(m.end_time);
-    countdown.className = `countdown-badge ${urgent ? 'countdown-urgent' : 'countdown-normal'}`;
-    countdown.textContent = '⏱ ' + formatCountdown(m.end_time);
-    header.appendChild(category);
-    header.appendChild(countdown);
-
-    // Title
-    const title = document.createElement('h3');
-    title.className = 'font-semibold text-base mb-3 line-clamp-2 leading-snug';
-    title.textContent = m.title; // XSS-safe
-
-    // YES/NO price buttons (Polymarket-style)
-    const outcomesWrap = document.createElement('div');
-    outcomesWrap.className = 'space-y-2 mb-3';
-    m.outcomes.forEach((name, i) => {
-      const price = m.prices[i] ?? 0;
-      const pct = Math.round(price * 100);
-      const isYes = name.toLowerCase() === 'yes' || i === 0;
-
-      const btn = document.createElement('div');
-      btn.className = `outcome-btn ${isYes ? 'outcome-btn-yes' : 'outcome-btn-no'}`;
-      btn.innerHTML = '';
-      const nameSpan = document.createElement('span');
-      nameSpan.textContent = name;
-      const priceSpan = document.createElement('span');
-      priceSpan.textContent = `${pct}¢`;
-      btn.appendChild(nameSpan);
-      btn.appendChild(priceSpan);
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openOrderModal(m.id, i);
-      });
-      outcomesWrap.appendChild(btn);
-    });
-
-    // Footer: volume + liquidity
-    const footer = document.createElement('div');
-    footer.className = 'flex items-center justify-between text-xs text-gray-400 pt-3 border-t border-dark-700';
-    const volSpan = document.createElement('span');
-    volSpan.textContent = `Vol: ${formatMoney(m.total_volume)}`;
-    const liqSpan = document.createElement('span');
-    liqSpan.textContent = `Liq: ${formatMoney(m.liquidity_b || 200)}`;
-    footer.appendChild(volSpan);
-    footer.appendChild(liqSpan);
-
-    card.appendChild(header);
-    card.appendChild(title);
-    card.appendChild(outcomesWrap);
-    card.appendChild(footer);
-    card.addEventListener('click', () => openOrderModal(m.id));
-    grid.appendChild(card);
-  });
-}
-
 function renderFeaturedMarket() {
   const container = document.getElementById('featuredMarket');
   if (!container || !AppState.markets.length) return;
@@ -172,7 +94,46 @@ function renderFeaturedMarket() {
   }
 }
 
+function getFilteredMarkets() {
+  let markets = [...AppState.markets];
+  const search = (AppState.searchQuery || '').toLowerCase().trim();
+  const sort = AppState.sortBy || 'volume';
+
+  // Search filter
+  if (search) {
+    markets = markets.filter(
+      (m) =>
+        m.title.toLowerCase().includes(search) ||
+        (m.description || '').toLowerCase().includes(search) ||
+        m.category.toLowerCase().includes(search)
+    );
+  }
+
+  // Sort
+  if (sort === 'volume') {
+    markets.sort((a, b) => b.total_volume - a.total_volume);
+  } else if (sort === 'newest') {
+    markets.sort((a, b) => (b.id || 0) - (a.id || 0));
+  } else if (sort === 'ending') {
+    markets.sort((a, b) => {
+      const aEnd = a.end_time ? new Date(a.end_time) : Infinity;
+      const bEnd = b.end_time ? new Date(b.end_time) : Infinity;
+      return aEnd - bEnd;
+    });
+  }
+
+  return markets;
+}
+
 async function loadMarkets() {
+  // Show skeleton loader
+  const skeleton = document.getElementById('marketsSkeleton');
+  const grid = document.getElementById('marketsGrid');
+  const empty = document.getElementById('marketsEmpty');
+  if (skeleton) skeleton.classList.remove('hidden');
+  if (grid) grid.classList.add('hidden');
+  if (empty) empty.classList.add('hidden');
+
   try {
     const res = await ApiClient.getMarkets(AppState.activeCategory);
     // API now returns a paginated envelope { items, total, page, ... }
@@ -181,7 +142,94 @@ async function loadMarkets() {
     renderFeaturedMarket();
   } catch (e) {
     showToast(`Failed to load markets: ${e.message}`, true);
+    // Show empty state on error
+    if (skeleton) skeleton.classList.add('hidden');
+    if (empty) empty.classList.remove('hidden');
   }
+}
+
+function renderMarkets() {
+  const skeleton = document.getElementById('marketsSkeleton');
+  const grid = document.getElementById('marketsGrid');
+  const empty = document.getElementById('marketsEmpty');
+
+  // Hide skeleton
+  if (skeleton) skeleton.classList.add('hidden');
+
+  const markets = getFilteredMarkets();
+
+  if (!markets.length) {
+    if (grid) grid.classList.add('hidden');
+    if (empty) empty.classList.remove('hidden');
+    return;
+  }
+
+  if (empty) empty.classList.add('hidden');
+  if (grid) grid.classList.remove('hidden');
+  grid.textContent = '';
+
+  markets.forEach((m) => {
+    const card = document.createElement('div');
+    card.className = 'bg-dark-800 rounded-xl p-5 card-hover transition-all duration-300 border border-dark-700';
+
+    // Header: category + countdown
+    const header = document.createElement('div');
+    header.className = 'flex items-center justify-between mb-3';
+    const category = document.createElement('span');
+    category.className = 'text-xs px-2 py-1 rounded bg-dark-700 text-gray-400 capitalize font-medium';
+    category.textContent = m.category;
+    const countdown = document.createElement('span');
+    const urgent = isUrgent(m.end_time);
+    countdown.className = `countdown-badge ${urgent ? 'countdown-urgent' : 'countdown-normal'}`;
+    countdown.textContent = '⏱ ' + formatCountdown(m.end_time);
+    header.appendChild(category);
+    header.appendChild(countdown);
+
+    // Title
+    const title = document.createElement('h3');
+    title.className = 'font-semibold text-base mb-3 line-clamp-2 leading-snug';
+    title.textContent = m.title; // XSS-safe
+
+    // YES/NO price buttons (Polymarket-style)
+    const outcomesWrap = document.createElement('div');
+    outcomesWrap.className = 'space-y-2 mb-3';
+    m.outcomes.forEach((name, i) => {
+      const price = m.prices[i] ?? 0;
+      const pct = Math.round(price * 100);
+      const isYes = name.toLowerCase() === 'yes' || i === 0;
+
+      const btn = document.createElement('div');
+      btn.className = `outcome-btn ${isYes ? 'outcome-btn-yes' : 'outcome-btn-no'}`;
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = name;
+      const priceSpan = document.createElement('span');
+      priceSpan.textContent = `${pct}¢`;
+      btn.appendChild(nameSpan);
+      btn.appendChild(priceSpan);
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openOrderModal(m.id, i);
+      });
+      outcomesWrap.appendChild(btn);
+    });
+
+    // Footer: volume + liquidity
+    const footer = document.createElement('div');
+    footer.className = 'flex items-center justify-between text-xs text-gray-500 pt-3 border-t border-dark-700';
+    const volSpan = document.createElement('span');
+    volSpan.textContent = `Vol: ${formatMoney(m.total_volume)}`;
+    const liqSpan = document.createElement('span');
+    liqSpan.textContent = `Liq: ${formatMoney(m.liquidity_b || 200)}`;
+    footer.appendChild(volSpan);
+    footer.appendChild(liqSpan);
+
+    card.appendChild(header);
+    card.appendChild(title);
+    card.appendChild(outcomesWrap);
+    card.appendChild(footer);
+    card.addEventListener('click', () => openOrderModal(m.id));
+    grid.appendChild(card);
+  });
 }
 
 function initCategoryTabs() {
@@ -196,16 +244,43 @@ function initCategoryTabs() {
   });
 }
 
+function initSearchAndSort() {
+  const searchInput = document.getElementById('marketSearch');
+  const sortSelect = document.getElementById('marketSort');
+
+  if (searchInput) {
+    let debounceTimer;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        AppState.searchQuery = searchInput.value;
+        renderMarkets();
+      }, 300);
+    });
+  }
+
+  if (sortSelect) {
+    sortSelect.addEventListener('change', () => {
+      AppState.sortBy = sortSelect.value;
+      renderMarkets();
+    });
+  }
+}
+
 async function loadStats() {
   try {
     const stats = await ApiClient.getStats();
     setText('activeMarkets', String(stats.active_markets));
     setText('totalVolume', formatMoney(stats.total_volume));
     setText('totalTrades', String(stats.total_trades));
-    // Also update the ticker bar
+    // Ticker bar
     setText('tickerVolume', formatMoney(stats.total_volume));
     setText('tickerActive', String(stats.active_markets));
     setText('tickerTrades', String(stats.total_trades));
+    // Trust signals
+    setText('statVolume', formatMoney(stats.total_volume));
+    setText('statMarkets', String(stats.active_markets));
+    setText('statTrades', String(stats.total_trades));
   } catch (e) {
     /* stats are non-critical */
   }
@@ -321,6 +396,7 @@ function initAuthUI() {
 document.addEventListener('DOMContentLoaded', () => {
   initAuthUI();
   initCategoryTabs();
+  initSearchAndSort();
   document.getElementById('orderAmount')?.addEventListener('input', updateOrderEstimate);
   document.getElementById('outcomeSelect')?.addEventListener('change', updateOrderEstimate);
 
